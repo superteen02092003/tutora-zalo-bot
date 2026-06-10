@@ -1,10 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { BeClientService } from '../../be-client/be-client.service';
-import { SubjectCacheService } from '../../be-client/subject-cache.service';
+import { TutorCandidateDto } from '../../be-client/dto';
+import { LlmRouterService } from '../../llm/llm-router.service';
+import { RouterDecision } from '../../llm/llm-router.types';
 import { ZaloWebhookEvent } from '../../webhook/zalo-event.dto';
 import { getMessageText, getZaloUserId } from '../../webhook/zalo-event.utils';
 import { ZaloService } from '../../zalo/zalo.service';
+import { OnboardingFlow } from '../flows/onboarding.flow';
 import { ConversationContext } from '../state/conversation-context.interface';
 import { ConversationStateService } from '../state/conversation-state.service';
 
@@ -16,179 +18,136 @@ export class MessageHandler {
   constructor(
     private readonly state: ConversationStateService,
     private readonly zalo: ZaloService,
-    private readonly beClient: BeClientService,
-    private readonly subjectCache: SubjectCacheService,
+    private readonly llmRouter: LlmRouterService,
+    private readonly onboardingFlow: OnboardingFlow,
     config: ConfigService,
   ) {
     this.adminUserIds = new Set(config.get<string[]>('adminZaloUserIds') ?? []);
   }
 
   async handle(event: ZaloWebhookEvent): Promise<void> {
-    const zaloUserId = getZaloUserId(event);
-    if (!zaloUserId) {
+    const userId = getZaloUserId(event);
+    if (!userId) {
       this.logger.warn(`Message event missing sender id: ${JSON.stringify(event)}`);
       return;
     }
 
-    const messageText = getMessageText(event);
-    this.logger.debug(`Message | user=${zaloUserId} | text="${messageText}"`);
+    const text = getMessageText(event);
+    this.logger.debug(`Message | user=${userId} | text="${text}"`);
 
-    // ── Admin commands ──────────────────────────────────────────────────────
-    if (this.adminUserIds.has(zaloUserId)) {
-      const handled = await this.handleAdminCommand(zaloUserId, messageText);
+    const context = await this.state.getContext(userId);
+    if (context.botChatDisabled) return;
+
+    if (this.adminUserIds.has(userId)) {
+      const handled = await this.handleAdminCommand(userId, text);
       if (handled) return;
     }
 
-    // ── Tìm gia sư trigger ─────────────────────────────────────────────────
-    if (
-      messageText === '#timgiasu' ||
-      messageText === 'onboarding:start' ||
-      messageText === 'Tìm gia sư'
-    ) {
-      await this.state.updateContext(zaloUserId, {
-        findTutorStep: 'awaiting_subject',
-        subject: undefined,
-        grade: undefined,
-        tutorGender: undefined,
-        personalCriteria: undefined,
-      });
-      await this.zalo.sendText(zaloUserId, 'Hiện tại anh/chị cần tìm gia sư dạy môn nào ạ?');
-      return;
-    }
+    const convState = await this.state.getState(userId);
+    const candidates = await this.state.getMatchingCandidates<TutorCandidateDto>(userId);
 
-    // ── Find tutor flow ────────────────────────────────────────────────────
-    const context = await this.state.getContext(zaloUserId);
+    const decision = await this.llmRouter.decide({ message: text, state: convState, context, candidates });
+    this.logger.debug(`LLM decision | user=${userId} | ${JSON.stringify(decision)}`);
 
-    if (context.findTutorStep) {
-      await this.handleFindTutorFlow(zaloUserId, messageText, context);
-      return;
-    }
+    await this.executeDecision(userId, decision, context, candidates);
   }
 
-  private async handleFindTutorFlow(
-    zaloUserId: string,
-    text: string,
+  private async executeDecision(
+    userId: string,
+    decision: RouterDecision,
     context: ConversationContext,
+    candidates: TutorCandidateDto[],
   ): Promise<void> {
-    switch (context.findTutorStep) {
-      case 'awaiting_subject': {
-        const matched = await this.subjectCache.normalize(text);
-        const subject = matched?.name ?? text;
-        await this.state.updateContext(zaloUserId, {
-          subject,
-          findTutorStep: 'awaiting_grade',
-        });
-        await this.zalo.sendText(zaloUserId, 'Học sinh đang học lớp mấy ạ? (ví dụ: 5, 9, 11)');
+    switch (decision.action) {
+      case 'start_onboarding':
+        await this.onboardingFlow.start(userId);
+        break;
+
+      case 'fill_slot':
+        await this.onboardingFlow.applySlot(userId, decision.slot, decision.value);
+        break;
+
+      case 'select_tutor': {
+        const tutor = candidates.find((c) =>
+          c.fullName.toLowerCase().includes(decision.tutorName.toLowerCase()),
+        );
+        if (!tutor) {
+          await this.zalo.sendText(userId, `Mình không tìm thấy gia sư "${decision.tutorName}" trong danh sách. Bạn chọn lại nhé?`);
+          return;
+        }
+        await this.handleTutorSelected(userId, tutor);
         break;
       }
 
-      case 'awaiting_grade': {
-        await this.state.updateContext(zaloUserId, {
-          grade: text,
-          findTutorStep: 'awaiting_gender',
-        });
-        await this.zalo.sendInteractiveQuickReply(
-          zaloUserId,
-          'Anh/chị có yêu cầu về giới tính gia sư không?',
-          [
-            { title: 'Nam', payload: 'gender:male' },
-            { title: 'Nữ', payload: 'gender:female' },
-            { title: 'Không yêu cầu', payload: 'gender:any' },
-          ],
+      case 'select_package':
+        await this.state.updateContext(userId, { selectedPackageSessionCount: decision.sessionCount });
+        await this.zalo.sendNumberedList(
+          userId,
+          `Đã chọn ${decision.sessionCount} buổi! Bạn muốn học mấy buổi mỗi tuần?`,
+          [{ label: '2 buổi/tuần' }, { label: '3 buổi/tuần' }],
         );
         break;
-      }
 
-      case 'awaiting_gender': {
-        let tutorGender: 'male' | 'female' | 'any' = 'any';
-        if (text === 'gender:male' || text.toLowerCase().includes('nam')) tutorGender = 'male';
-        else if (text === 'gender:female' || text.toLowerCase().includes('nữ')) tutorGender = 'female';
-
-        await this.state.updateContext(zaloUserId, {
-          tutorGender,
-          findTutorStep: 'awaiting_criteria',
+      case 'select_schedule':
+        await this.state.updateContext(userId, {
+          requiredSessionsPerWeek: decision.preset === 'twice_weekly' ? 2 : 3,
         });
         await this.zalo.sendText(
-          zaloUserId,
-          'Anh/chị có tiêu chí gì thêm không? (ví dụ: kinh nghiệm, phong cách dạy, khu vực...)\nNếu không có thể nhắn "Không".',
+          userId,
+          'Tutora đã ghi nhận. Nhân viên Tutora sẽ liên hệ để xác nhận lịch và gửi thông tin thanh toán cho bạn sớm nhé!',
         );
         break;
-      }
 
-      case 'awaiting_criteria': {
-        const criteria = text.toLowerCase() === 'không' || text === 'ko' ? '' : text;
-        await this.state.updateContext(zaloUserId, {
-          personalCriteria: criteria,
-          findTutorStep: 'awaiting_confirm',
-        });
-        await this.sendSummary(zaloUserId, { ...context, personalCriteria: criteria });
+      case 'check_status':
+        await this.zalo.sendText(userId, this.buildStatusMessage(context));
         break;
-      }
 
-      case 'awaiting_confirm': {
-        const confirmed = ['ok', 'đúng', 'xác nhận', 'yes', 'oke', 'chính xác', 'đúng rồi'].some(
-          (kw) => text.toLowerCase().includes(kw),
+      case 'answer_question':
+        await this.zalo.sendText(userId, decision.reply);
+        break;
+
+      case 'unknown':
+      default:
+        await this.zalo.sendText(
+          userId,
+          (decision as { reply?: string }).reply ?? 'Mình chưa hiểu ý bạn. Bạn muốn tìm gia sư hay cần hỗ trợ gì?',
         );
-        if (confirmed) {
-          await this.state.updateContext(zaloUserId, { findTutorStep: undefined });
-          await this.zalo.sendText(zaloUserId, 'Tutora đang tìm gia sư phù hợp cho anh/chị, vui lòng chờ trong giây lát...');
-          await this.suggestTutors(zaloUserId, context);
-        } else {
-          await this.state.updateContext(zaloUserId, { findTutorStep: 'awaiting_subject' });
-          await this.zalo.sendText(zaloUserId, 'Anh/chị muốn thay đổi thông tin. Vui lòng nhập lại môn học:');
-        }
         break;
-      }
     }
   }
 
-  private async sendSummary(zaloUserId: string, context: ConversationContext): Promise<void> {
-    const genderLabel =
-      context.tutorGender === 'male' ? 'Nam' :
-      context.tutorGender === 'female' ? 'Nữ' : 'Không yêu cầu';
-
-    const summary = [
-      `📚 Môn học: ${context.subject}`,
-      `🎓 Lớp: ${context.grade}`,
-      `👤 Giới tính gia sư: ${genderLabel}`,
-      context.personalCriteria ? `📝 Tiêu chí thêm: ${context.personalCriteria}` : null,
-    ]
-      .filter(Boolean)
-      .join('\n');
-
-    await this.zalo.sendText(
-      zaloUserId,
-      `Tutora xin xác nhận lại thông tin:\n\n${summary}\n\nThông tin đúng không ạ? (nhắn "OK" để xác nhận hoặc nhắn khác để nhập lại)`,
+  private async handleTutorSelected(userId: string, tutor: TutorCandidateDto): Promise<void> {
+    await this.state.updateContext(userId, {
+      selectedTutorId: tutor.tutorId,
+      selectedTutorName: tutor.fullName,
+    });
+    await this.zalo.sendNumberedList(
+      userId,
+      `Bạn đã chọn ${tutor.fullName}! Bạn muốn học gói bao nhiêu buổi?`,
+      [
+        { label: '4 buổi', hint: 'thử nghiệm' },
+        { label: '8 buổi', hint: 'phổ biến' },
+        { label: '12 buổi', hint: 'tiết kiệm nhất' },
+      ],
     );
   }
 
-  private async suggestTutors(zaloUserId: string, context: ConversationContext): Promise<void> {
-    const result = await this.beClient.getMatchedTutors({
-      subject: context.subject ?? '',
-      grade: context.grade ?? '',
-      locationDistrict: '',
-      budgetMax: 999999999,
-      genderPreference: context.tutorGender,
-    });
-
-    if (!result.candidates.length) {
-      await this.zalo.sendText(zaloUserId, 'Hiện tại chưa có gia sư phù hợp. Tutora sẽ liên hệ lại anh/chị sớm nhé!');
-      return;
+  private buildStatusMessage(context: ConversationContext): string {
+    if (context.activeBookingId) {
+      return `Lịch học của bạn đang hoạt động (booking #${context.activeBookingId}). Bạn cần hỗ trợ gì?`;
     }
-
-    await this.zalo.sendText(zaloUserId, `Tutora tìm được ${result.candidates.length} gia sư phù hợp:`);
-
-    for (const tutor of result.candidates) {
-      await this.zalo.sendTutorCard(zaloUserId, tutor, 'https://tutora.vn/gia-su');
+    if (context.selectedTutorName) {
+      return `Bạn đang trong quá trình đặt lịch với ${context.selectedTutorName}. Bạn muốn tiếp tục không?`;
     }
-
-    await this.zalo.sendText(zaloUserId, 'Anh/chị muốn chọn gia sư nào? Vui lòng nhắn tên gia sư để Tutora hỗ trợ đặt lịch.');
+    if (context.criteria?.subject) {
+      return `Bạn đang tìm gia sư môn ${context.criteria.subject}. Bạn muốn xem lại danh sách gia sư không?`;
+    }
+    return 'Hiện bạn chưa có lịch học nào. Bạn muốn tìm gia sư không?';
   }
 
   private async handleAdminCommand(adminId: string, text: string): Promise<boolean> {
     const match = text.match(/^\/botchat\s+(on|off)\s+(\S+)$/i);
     if (!match) return false;
-
     const [, action, targetUserId] = match;
     const disabled = action.toLowerCase() === 'off';
     await this.state.updateContext(targetUserId, { botChatDisabled: disabled });

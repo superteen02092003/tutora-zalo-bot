@@ -1,66 +1,40 @@
-import { MessageHandler } from './message.handler';
+import { ConfigService } from '@nestjs/config';
 import { ConversationState } from '../state/conversation-state.enum';
+import { MessageHandler } from './message.handler';
 
 describe('MessageHandler', () => {
   const state = {
     getState: jest.fn(),
     getContext: jest.fn(),
     getMatchingCandidates: jest.fn(),
-  };
-  const onboardingFlow = {
-    start: jest.fn(),
-    handlePostbackInput: jest.fn(),
-    applySlot: jest.fn(),
-  };
-  const bookingFlow = {
-    handlePostback: jest.fn(),
-    selectTutorByName: jest.fn(),
-    selectPackageByCount: jest.fn(),
-    promptCurrentStep: jest.fn(),
-  };
-  const scheduleFlow = {
-    handleRescheduleInput: jest.fn(),
-    handleCancelReason: jest.fn(),
-    submitDispute: jest.fn(),
-    initiateReschedule: jest.fn(),
-    initiateCancel: jest.fn(),
-    initiateDispute: jest.fn(),
-  };
-  const replacementTutorFlow = {
-    handlePostback: jest.fn(),
-  };
-  const beClient = {
-    getActiveBookingByZaloId: jest.fn(),
-    getBooking: jest.fn(),
-  };
-  const llmRouter = {
-    decide: jest.fn(),
+    updateContext: jest.fn(),
   };
   const zalo = {
     sendText: jest.fn(),
-    sendQuickReply: jest.fn(),
+    sendNumberedList: jest.fn(),
   };
+  const llmRouter = { decide: jest.fn() };
+  const onboardingFlow = { start: jest.fn(), applySlot: jest.fn() };
+  const config = { get: jest.fn().mockReturnValue([]) } as unknown as ConfigService;
 
   let handler: MessageHandler;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    state.getContext.mockResolvedValue({ zaloUserId: 'zalo-1' });
+    state.getContext.mockResolvedValue({});
     state.getMatchingCandidates.mockResolvedValue([]);
+    state.getState.mockResolvedValue(ConversationState.New);
     handler = new MessageHandler(
       state as never,
-      onboardingFlow as never,
-      bookingFlow as never,
-      scheduleFlow as never,
-      replacementTutorFlow as never,
-      beClient as never,
-      llmRouter as never,
       zalo as never,
+      llmRouter as never,
+      onboardingFlow as never,
+      config,
     );
   });
 
-  it('starts onboarding for NEW state regardless of message', async () => {
-    state.getState.mockResolvedValue(ConversationState.New);
+  it('skips processing when botChatDisabled', async () => {
+    state.getContext.mockResolvedValue({ botChatDisabled: true });
 
     await handler.handle({
       event_name: 'user_send_text',
@@ -68,27 +42,24 @@ describe('MessageHandler', () => {
       message: { text: 'hi' },
     } as never);
 
-    expect(onboardingFlow.start).toHaveBeenCalledWith('zalo-1');
     expect(llmRouter.decide).not.toHaveBeenCalled();
   });
 
-  it('routes onboarding: postback directly without LLM', async () => {
-    state.getState.mockResolvedValue(ConversationState.Onboarding);
+  it('routes start_onboarding to onboardingFlow.start()', async () => {
+    llmRouter.decide.mockResolvedValue({ action: 'start_onboarding' });
 
     await handler.handle({
       event_name: 'user_send_text',
       sender: { id: 'zalo-1' },
-      message: { text: '' },
-      postback: { data: 'onboarding:grade:Lop 11' } as never,
+      message: { text: 'tôi muốn tìm gia sư' },
     } as never);
 
-    expect(onboardingFlow.handlePostbackInput).toHaveBeenCalledWith('zalo-1', 'onboarding:grade:Lop 11');
-    expect(llmRouter.decide).not.toHaveBeenCalled();
+    expect(onboardingFlow.start).toHaveBeenCalledWith('zalo-1');
   });
 
-  it('dispatches fill_slot to onboardingFlow.applySlot when in correct step', async () => {
+  it('routes fill_slot to onboardingFlow.applySlot()', async () => {
     state.getState.mockResolvedValue(ConversationState.Onboarding);
-    state.getContext.mockResolvedValue({ zaloUserId: 'zalo-1', onboardingStep: 'grade' });
+    state.getContext.mockResolvedValue({ onboardingStep: 'grade' });
     llmRouter.decide.mockResolvedValue({ action: 'fill_slot', slot: 'grade', value: 'Lop 11' });
 
     await handler.handle({
@@ -100,42 +71,11 @@ describe('MessageHandler', () => {
     expect(onboardingFlow.applySlot).toHaveBeenCalledWith('zalo-1', 'grade', 'Lop 11');
   });
 
-  it('dispatches select_tutor to bookingFlow.selectTutorByName', async () => {
-    state.getState.mockResolvedValue(ConversationState.Matched);
-    state.getContext.mockResolvedValue({ zaloUserId: 'zalo-1' });
-    llmRouter.decide.mockResolvedValue({ action: 'select_tutor', tutorName: 'Nguyen Minh Anh' });
-
-    await handler.handle({
-      event_name: 'user_send_text',
-      sender: { id: 'zalo-1' },
-      message: { text: 'chọn Nguyễn Minh Anh' },
-    } as never);
-
-    expect(bookingFlow.selectTutorByName).toHaveBeenCalledWith('zalo-1', 'Nguyen Minh Anh');
-  });
-
-  it('routes active sub-flow (reschedule awaiting time) deterministically', async () => {
-    state.getState.mockResolvedValue(ConversationState.Active);
-    state.getContext.mockResolvedValue({
-      zaloUserId: 'zalo-1',
-      activeFlow: 'reschedule',
-      rescheduleStep: 'awaiting_new_time',
+  it('sends answer_question reply via zalo.sendText()', async () => {
+    llmRouter.decide.mockResolvedValue({
+      action: 'answer_question',
+      reply: 'Tutora hỗ trợ dạy kèm tại nhà và online.',
     });
-
-    await handler.handle({
-      event_name: 'user_send_text',
-      sender: { id: 'zalo-1' },
-      message: { text: '25/06 19:00' },
-    } as never);
-
-    expect(scheduleFlow.handleRescheduleInput).toHaveBeenCalledWith('zalo-1', '25/06 19:00');
-    expect(llmRouter.decide).not.toHaveBeenCalled();
-  });
-
-  it('sends answer_question reply directly', async () => {
-    state.getState.mockResolvedValue(ConversationState.Onboarding);
-    state.getContext.mockResolvedValue({ zaloUserId: 'zalo-1', onboardingStep: 'subject' });
-    llmRouter.decide.mockResolvedValue({ action: 'answer_question', reply: 'Tutora hỗ trợ dạy kèm tại nhà và online.' });
 
     await handler.handle({
       event_name: 'user_send_text',
@@ -145,5 +85,41 @@ describe('MessageHandler', () => {
 
     expect(zalo.sendText).toHaveBeenCalledWith('zalo-1', 'Tutora hỗ trợ dạy kèm tại nhà và online.');
     expect(onboardingFlow.applySlot).not.toHaveBeenCalled();
+  });
+
+  it('handles select_tutor by finding candidate and prompting package', async () => {
+    state.getState.mockResolvedValue(ConversationState.Matched);
+    state.getMatchingCandidates.mockResolvedValue([
+      { tutorId: 't1', fullName: 'Nguyễn Minh Anh' },
+    ]);
+    llmRouter.decide.mockResolvedValue({ action: 'select_tutor', tutorName: 'Minh Anh' });
+    state.updateContext.mockResolvedValue(undefined);
+
+    await handler.handle({
+      event_name: 'user_send_text',
+      sender: { id: 'zalo-1' },
+      message: { text: 'chọn Minh Anh' },
+    } as never);
+
+    expect(state.updateContext).toHaveBeenCalledWith('zalo-1', {
+      selectedTutorId: 't1',
+      selectedTutorName: 'Nguyễn Minh Anh',
+    });
+    expect(zalo.sendNumberedList).toHaveBeenCalled();
+  });
+
+  it('sends error message when select_tutor name not found', async () => {
+    state.getState.mockResolvedValue(ConversationState.Matched);
+    state.getMatchingCandidates.mockResolvedValue([{ tutorId: 't1', fullName: 'Nguyễn Minh Anh' }]);
+    llmRouter.decide.mockResolvedValue({ action: 'select_tutor', tutorName: 'Không Ai Cả' });
+
+    await handler.handle({
+      event_name: 'user_send_text',
+      sender: { id: 'zalo-1' },
+      message: { text: 'chọn Không Ai Cả' },
+    } as never);
+
+    expect(zalo.sendText).toHaveBeenCalledWith('zalo-1', expect.stringContaining('Không Ai Cả'));
+    expect(state.updateContext).not.toHaveBeenCalled();
   });
 });
