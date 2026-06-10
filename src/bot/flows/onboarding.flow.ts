@@ -148,27 +148,12 @@ export class OnboardingFlow {
     zaloUserId: string,
     preferredLanguage: BotLanguage,
   ): Promise<void> {
-    const subjects = await this.beClient.getSubjects();
-    // Cap at 9 buttons (3 messages × 3) to avoid message spam
-    const displayed = subjects.slice(0, 9);
-    await this.zalo.sendInteractiveQuickReply(
+    await this.zalo.sendText(
       zaloUserId,
       preferredLanguage === 'en'
-        ? 'Tutora will help you find a suitable tutor. Which subject would you like to study?'
-        : 'Tutora sẽ giúp bạn tìm gia sư phù hợp. Bạn muốn học môn nào?',
-      displayed.map((subject) => ({
-        title: subject.name,
-        payload: `onboarding:subject:${subject.name}`,
-      })),
+        ? 'Tutora will help you find a suitable tutor. Which subject would you like to study? (e.g. Math, English, Physics...)'
+        : 'Tutora sẽ giúp bạn tìm gia sư phù hợp. Bạn muốn học môn gì? (ví dụ: Toán, Tiếng Anh, Vật Lý...)',
     );
-    if (subjects.length > 9) {
-      await this.zalo.sendText(
-        zaloUserId,
-        preferredLanguage === 'en'
-          ? 'Or type the subject name if not listed above.'
-          : 'Hoặc nhắn tên môn học nếu không thấy trong danh sách.',
-      );
-    }
   }
 
   private async askMode(
@@ -202,30 +187,25 @@ export class OnboardingFlow {
     zaloUserId: string,
     context: ConversationContext,
   ): Promise<void> {
-    await this.zalo.sendQuickReply(
+    await this.zalo.sendNumberedList(
       zaloUserId,
       this.text(context, {
         vi: 'Mục tiêu học của con là gì?',
         en: "What is the student's learning goal?",
       }),
-      [
-        {
-          title: this.text(context, { vi: '📝 Ôn thi', en: '📝 Exam prep' }),
-          payload: 'onboarding:purpose:exam_prep',
-        },
-        {
-          title: this.text(context, { vi: '📚 Học thêm kiến thức', en: '📚 General study' }),
-          payload: 'onboarding:purpose:regular',
-        },
-        {
-          title: this.text(context, { vi: '🔁 Lấy lại nền tảng', en: '🔁 Build foundation' }),
-          payload: 'onboarding:purpose:foundation',
-        },
-        {
-          title: this.text(context, { vi: '🏆 Nâng cao / Học sinh giỏi', en: '🏆 Advanced / Gifted' }),
-          payload: 'onboarding:purpose:advanced',
-        },
-      ],
+      this.isEnglish(context)
+        ? [
+            { label: 'Exam prep', hint: 'entrance exam, university exam' },
+            { label: 'General study', hint: 'follow school curriculum' },
+            { label: 'Build foundation', hint: 'catch up on basics' },
+            { label: 'Advanced', hint: 'gifted student / enrichment' },
+          ]
+        : [
+            { label: 'Ôn thi', hint: 'thi vào 10, THPT quốc gia, đại học' },
+            { label: 'Học thêm', hint: 'theo chương trình trường' },
+            { label: 'Lấy lại nền', hint: 'mất căn bản, học lại từ đầu' },
+            { label: 'Nâng cao', hint: 'học sinh giỏi, tư duy chuyên sâu' },
+          ],
     );
   }
 
