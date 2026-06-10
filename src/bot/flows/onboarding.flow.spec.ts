@@ -121,19 +121,18 @@ describe('OnboardingFlow', () => {
     );
   });
 
-  it('applySlot gender triggers matching', async () => {
+  it('applySlot purpose triggers matching', async () => {
     state.getContext.mockResolvedValue({
       zaloUserId: 'zalo-1',
       preferredLanguage: 'vi',
       criteria: {
         subject: 'Toan',
         grade: 'Lop 9',
-        locationDistrict: 'Quan 1',
-        budgetMax: 250000,
+        teachingMode: 'online',
       },
     });
 
-    await flow.applySlot('zalo-1', 'gender', 'any');
+    await flow.applySlot('zalo-1', 'purpose', 'exam_prep');
 
     expect(state.updateContext).toHaveBeenCalledWith(
       'zalo-1',

@@ -27,9 +27,10 @@ export interface TutorCandidateDto {
 export interface MatchCriteria {
   subject: string;
   grade: string;
-  locationDistrict: string;
-  budgetMax: number;
-  genderPreference?: string;
+  teachingMode: 'online' | 'offline' | 'both';
+  locationDistrict?: string;
+  purpose?: 'exam_prep' | 'regular' | 'foundation' | 'advanced';
+  genderPreference?: 'male' | 'female' | 'any';
 }
 
 export interface MatchTutorsResult {

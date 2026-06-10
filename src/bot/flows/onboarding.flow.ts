@@ -92,7 +92,7 @@ export class OnboardingFlow {
           zaloUserId,
           this.text(context, {
             vi: 'Học sinh đang học lớp mấy? Nhắn số lớp nhé (1-12, ví dụ: 9, 10, 11).',
-            en: 'What grade is the student in? Please reply with a grade number (1-12, for example: 9, 10, 11).',
+            en: 'What grade is the student in? Please reply with a grade number (1-12).',
           }),
         );
         break;
@@ -100,73 +100,43 @@ export class OnboardingFlow {
 
       case 'grade': {
         await this.updateCriteria(zaloUserId, context, { grade: value });
-        await this.state.updateContext(zaloUserId, { onboardingStep: 'area' });
-        await this.zalo.sendText(
-          zaloUserId,
-          this.text(context, {
-            vi: 'Bạn muốn học ở khu vực quận/huyện nào? Ví dụ: Quận 1, Gò Vấp, Thủ Đức.',
-            en: 'Which district/area would you like to study in? For example: District 1, Go Vap, Thu Duc.',
-          }),
-        );
+        await this.state.updateContext(zaloUserId, { onboardingStep: 'mode' });
+        await this.askMode(zaloUserId, context);
+        break;
+      }
+
+      case 'mode': {
+        const teachingMode = value as 'online' | 'offline' | 'both';
+        await this.updateCriteria(zaloUserId, context, { teachingMode });
+
+        if (teachingMode === 'online') {
+          // Skip area question for online-only
+          await this.state.updateContext(zaloUserId, { onboardingStep: 'purpose' });
+          await this.askPurpose(zaloUserId, context);
+        } else {
+          await this.state.updateContext(zaloUserId, { onboardingStep: 'area' });
+          await this.zalo.sendText(
+            zaloUserId,
+            this.text(context, {
+              vi: 'Bạn muốn học ở khu vực quận/huyện nào? Ví dụ: Quận 1, Gò Vấp, Thủ Đức.',
+              en: 'Which district/area would you like to study in? For example: District 1, Go Vap, Thu Duc.',
+            }),
+          );
+        }
         break;
       }
 
       case 'area': {
+        await this.updateCriteria(zaloUserId, context, { locationDistrict: value });
+        await this.state.updateContext(zaloUserId, { onboardingStep: 'purpose' });
+        await this.askPurpose(zaloUserId, context);
+        break;
+      }
+
+      case 'purpose': {
         await this.updateCriteria(zaloUserId, context, {
-          locationDistrict: value,
+          purpose: value as MatchCriteria['purpose'],
         });
-        await this.state.updateContext(zaloUserId, { onboardingStep: 'budget' });
-        await this.zalo.sendNumberedList(
-          zaloUserId,
-          this.text(context, {
-            vi: 'Ngân sách mỗi buổi của bạn?',
-            en: 'What is your budget per lesson?',
-          }),
-          this.isEnglish(context)
-            ? [
-                { label: 'Under 150k' },
-                { label: '150k - 250k' },
-                { label: 'Over 250k' },
-              ]
-            : [
-                { label: 'Dưới 150k' },
-                { label: '150k - 250k' },
-                { label: 'Trên 250k' },
-              ],
-        );
-        break;
-      }
-
-      case 'budget': {
-        const budgetMax = Number(value);
-        if (!budgetMax) break;
-        await this.updateCriteria(zaloUserId, context, { budgetMax });
-        await this.state.updateContext(zaloUserId, { onboardingStep: 'gender' });
-        await this.zalo.sendNumberedList(
-          zaloUserId,
-          this.text(context, {
-            vi: 'Bạn có ưu tiên giới tính gia sư không?',
-            en: 'Do you have a gender preference for the tutor?',
-          }),
-          this.isEnglish(context)
-            ? [
-                { label: 'No preference' },
-                { label: 'Male tutor' },
-                { label: 'Female tutor' },
-              ]
-            : [
-                { label: 'Không ưu tiên' },
-                { label: 'Thầy (Nam)' },
-                { label: 'Cô (Nữ)' },
-              ],
-        );
-        break;
-      }
-
-      case 'gender': {
-        const genderPreference =
-          value === 'any' ? undefined : (value as 'male' | 'female');
-        await this.updateCriteria(zaloUserId, context, { genderPreference });
         await this.state.updateContext(zaloUserId, { onboardingStep: 'done' });
         await this.matchingFlow.showMatches(zaloUserId);
         break;
@@ -184,10 +154,68 @@ export class OnboardingFlow {
       preferredLanguage === 'en'
         ? 'Tutora will help you find a suitable tutor. Which subject would you like to study?'
         : 'Tutora sẽ giúp bạn tìm gia sư phù hợp. Bạn muốn học môn nào?',
-      subjects.slice(0, 6).map((subject) => ({
+      subjects.map((subject) => ({
         title: subject.name,
         payload: `onboarding:subject:${subject.name}`,
       })),
+    );
+  }
+
+  private async askMode(
+    zaloUserId: string,
+    context: ConversationContext,
+  ): Promise<void> {
+    await this.zalo.sendQuickReply(
+      zaloUserId,
+      this.text(context, {
+        vi: 'Bạn muốn học theo hình thức nào?',
+        en: 'How would you like to study?',
+      }),
+      [
+        {
+          title: this.text(context, { vi: '💻 Học online', en: '💻 Online' }),
+          payload: 'onboarding:mode:online',
+        },
+        {
+          title: this.text(context, { vi: '🏠 Gia sư đến nhà', en: '🏠 In-person (at home)' }),
+          payload: 'onboarding:mode:offline',
+        },
+        {
+          title: this.text(context, { vi: '🔄 Linh hoạt cả hai', en: '🔄 Flexible (both)' }),
+          payload: 'onboarding:mode:both',
+        },
+      ],
+    );
+  }
+
+  private async askPurpose(
+    zaloUserId: string,
+    context: ConversationContext,
+  ): Promise<void> {
+    await this.zalo.sendQuickReply(
+      zaloUserId,
+      this.text(context, {
+        vi: 'Mục tiêu học của con là gì?',
+        en: "What is the student's learning goal?",
+      }),
+      [
+        {
+          title: this.text(context, { vi: '📝 Ôn thi', en: '📝 Exam prep' }),
+          payload: 'onboarding:purpose:exam_prep',
+        },
+        {
+          title: this.text(context, { vi: '📚 Học thêm kiến thức', en: '📚 General study' }),
+          payload: 'onboarding:purpose:regular',
+        },
+        {
+          title: this.text(context, { vi: '🔁 Lấy lại nền tảng', en: '🔁 Build foundation' }),
+          payload: 'onboarding:purpose:foundation',
+        },
+        {
+          title: this.text(context, { vi: '🏆 Nâng cao / Học sinh giỏi', en: '🏆 Advanced / Gifted' }),
+          payload: 'onboarding:purpose:advanced',
+        },
+      ],
     );
   }
 
@@ -200,8 +228,7 @@ export class OnboardingFlow {
       criteria: {
         subject: '',
         grade: '',
-        locationDistrict: '',
-        budgetMax: 0,
+        teachingMode: 'both',
         ...context.criteria,
         ...partial,
       },

@@ -1,10 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { BeClientService } from '../../be-client/be-client.service';
-import { TutorCandidateDto } from '../../be-client/dto';
+import { TutorCandidateDto, TutorSubscriptionType } from '../../be-client/dto';
 import { ZaloService } from '../../zalo/zalo.service';
 import { ConversationState } from '../state/conversation-state.enum';
 import { ConversationStateService } from '../state/conversation-state.service';
+
+const TIER_ORDER: TutorSubscriptionType[] = ['standard', 'pro', 'premium'];
 
 @Injectable()
 export class MatchingFlow {
@@ -27,10 +29,7 @@ export class MatchingFlow {
     const context = await this.state.getContext(zaloUserId);
 
     if (!context.criteria) {
-      await this.zalo.sendText(
-        zaloUserId,
-        'Mình cần thêm thông tin để tìm gia sư.',
-      );
+      await this.zalo.sendText(zaloUserId, 'Mình cần thêm thông tin để tìm gia sư.');
       return;
     }
 
@@ -46,18 +45,22 @@ export class MatchingFlow {
       return;
     }
 
+    // Pick the best-rated tutor from each tier
+    const displayed = this.pickOnePer(result.candidates);
+
     try {
-      await this.zalo.sendInteractiveListCard(
+      await this.zalo.sendText(
         zaloUserId,
-        result.candidates
-          .slice(0, 3)
-          .map((candidate) => this.toListElement(candidate)),
+        `Tutora tìm thấy ${result.candidates.length} gia sư phù hợp! Đây là ${displayed.length} gợi ý ở các mức học phí khác nhau:`,
       );
+
+      for (const candidate of displayed) {
+        await this.zalo.sendTutorCard(zaloUserId, candidate, this.tutorProfileBaseUrl);
+      }
+
       await this.state.transitionState(zaloUserId, ConversationState.Matched);
     } catch (error) {
-      this.logger.error(
-        `Failed to send tutor cards for ${zaloUserId}: ${String(error)}`,
-      );
+      this.logger.error(`Failed to send tutor cards for ${zaloUserId}: ${String(error)}`);
       await this.zalo.sendText(
         zaloUserId,
         'Mình gặp sự cố khi hiển thị danh sách gia sư. Bạn thử lại sau nhé.',
@@ -65,28 +68,17 @@ export class MatchingFlow {
     }
   }
 
-  private toListElement(candidate: TutorCandidateDto) {
-    const tierLabel: Record<string, string> = {
-      standard: 'Tiêu chuẩn',
-      pro: 'Pro',
-      premium: 'Premium',
-    };
+  // Returns at most 3 candidates — one per tier, in Standard→Pro→Premium order.
+  // Falls back to top 3 by rating if none match a tier.
+  private pickOnePer(candidates: TutorCandidateDto[]): TutorCandidateDto[] {
+    const picked = TIER_ORDER
+      .map((tier) => {
+        const inTier = candidates.filter((c) => c.subscriptionType === tier);
+        return inTier.sort((a, b) => b.averageRating - a.averageRating)[0];
+      })
+      .filter((c): c is TutorCandidateDto => !!c);
 
-    return {
-      title: candidate.fullName,
-      subtitle: [
-        `${tierLabel[candidate.subscriptionType] ?? candidate.subscriptionType}`,
-        `⭐ ${candidate.averageRating}/5 (${candidate.totalReviews} đánh giá)`,
-        `💰 ${candidate.hourlyRate.toLocaleString('vi-VN')}đ/buổi`,
-      ].join(' · '),
-      imageUrl: candidate.avatarUrl,
-      profileUrl: `${this.tutorProfileBaseUrl}/${candidate.tutorId}`,
-      buttons: [
-        {
-          title: 'Đặt lịch',
-          payload: `select_tutor:${candidate.tutorId}`,
-        },
-      ],
-    };
+    if (picked.length > 0) return picked;
+    return [...candidates].sort((a, b) => b.averageRating - a.averageRating).slice(0, 3);
   }
 }

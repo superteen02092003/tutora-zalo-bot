@@ -44,7 +44,7 @@ export type OnboardingStep =
   | 'language'
   | 'subject'
   | 'grade'
+  | 'mode'
   | 'area'
-  | 'budget'
-  | 'gender'
+  | 'purpose'
   | 'done';

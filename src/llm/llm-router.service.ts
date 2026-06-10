@@ -90,11 +90,11 @@ DANH SÁCH ACTION:
 
 Slot rules (chỉ fill slot đang được hỏi):
   • language → "vi" nếu user chọn Tiếng Việt/Vietnamese, "en" nếu user chọn English/tiếng Anh
-  • subject → PHẢI chọn đúng 1 trong danh sách (không được tự tạo giá trị khác): ${subjectNames.join(', ')}
-  • grade   → "Lop X" với X = 1–12 (ví dụ user nói "lớp 11" → "Lop 11")
-  • area    → tên quận/huyện/thành phố nguyên văn (ví dụ "Bình Thạnh", "Quận 1", "Thủ Đức")
-  • budget  → một trong: "150000" (<150k / rẻ / tùy), "250000" (150–250k / vừa), "350000" (>250k / cao)
-  • gender  → "male" (thầy/nam), "female" (cô/nữ), "any" (không ưu tiên / bất kỳ)
+  • subject  → PHẢI chọn đúng 1 trong danh sách (không được tự tạo giá trị khác): ${subjectNames.join(', ')}
+  • grade    → "Lop X" với X = 1–12 (ví dụ user nói "lớp 11" → "Lop 11")
+  • mode     → "online" (trực tuyến/online/qua video), "offline" (tại nhà/gặp trực tiếp/face-to-face), "both" (linh hoạt/cả hai/đều được)
+  • area     → tên quận/huyện/thành phố nguyên văn (ví dụ "Bình Thạnh", "Quận 1", "Thủ Đức")
+  • purpose  → "exam_prep" (ôn thi/thi vào 10/THPT quốc gia/thi đại học/luyện thi), "regular" (học thêm/học bình thường/theo chương trình), "foundation" (lấy lại nền/học lại từ đầu/mất căn bản), "advanced" (nâng cao/học sinh giỏi/HSG/phát triển tư duy)
 
 [B] User muốn tìm gia sư (không đang trong onboarding):
 {"action":"start_onboarding"}
@@ -149,9 +149,9 @@ NGUYÊN TẮC QUAN TRỌNG:
         language: 'Bạn muốn dùng Tiếng Việt hay English?',
         subject: 'Bạn muốn học môn nào?',
         grade: 'Học sinh đang học lớp mấy?',
+        mode: 'Bạn muốn học online, tại nhà, hay linh hoạt cả hai?',
         area: 'Bạn muốn học khu vực quận/huyện nào?',
-        budget: 'Ngân sách mỗi buổi của bạn? (<150k / 150–250k / >250k)',
-        gender: 'Bạn có ưu tiên giới tính gia sư không? (thầy/cô/không ưu tiên)',
+        purpose: 'Mục tiêu học là gì? (ôn thi / học thêm / lấy lại nền / nâng cao)',
       };
       return map[context.onboardingStep ?? ''] ?? '';
     }
@@ -173,8 +173,9 @@ NGUYÊN TẮC QUAN TRỌNG:
     const parts: string[] = [];
     if (c.subject) parts.push(`môn ${c.subject}`);
     if (c.grade) parts.push(c.grade.replace('Lop ', 'lớp '));
+    if (c.teachingMode) parts.push(c.teachingMode === 'online' ? 'online' : c.teachingMode === 'offline' ? 'tại nhà' : 'linh hoạt');
     if (c.locationDistrict) parts.push(c.locationDistrict);
-    if (c.budgetMax) parts.push(`ngân sách ${c.budgetMax.toLocaleString('vi-VN')}đ`);
+    if (c.purpose) parts.push({ exam_prep: 'ôn thi', regular: 'học thêm', foundation: 'lấy nền', advanced: 'nâng cao' }[c.purpose] ?? c.purpose);
     return parts.join(', ');
   }
 

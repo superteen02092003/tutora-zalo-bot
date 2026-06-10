@@ -138,7 +138,6 @@ export class BeClientService {
 
     let candidates = [...MOCK_TUTORS];
 
-    // Filter by subject
     if (criteria.subject) {
       const subjectLower = criteria.subject.toLowerCase();
       candidates = candidates.filter((t) =>
@@ -146,29 +145,24 @@ export class BeClientService {
       );
     }
 
-    // Filter by grade
     if (criteria.grade) {
-      candidates = candidates.filter((t) =>
-        t.grades?.includes(criteria.grade),
+      const gradeNum = criteria.grade.replace('Lop ', '');
+      candidates = candidates.filter((t) => t.grades?.includes(gradeNum));
+    }
+
+    if (criteria.teachingMode && criteria.teachingMode !== 'both') {
+      candidates = candidates.filter(
+        (t) => t.teachingMode === criteria.teachingMode || t.teachingMode === 'both',
       );
     }
 
-    // Filter by gender preference
     if (criteria.genderPreference && criteria.genderPreference !== 'any') {
       candidates = candidates.filter((t) => t.gender === criteria.genderPreference);
     }
 
-    // Sort: premium > pro > standard, then by rating
-    const rankOrder: Record<string, number> = { premium: 3, pro: 2, standard: 1 };
-    candidates.sort((a, b) => {
-      const rankDiff = (rankOrder[b.subscriptionType] ?? 0) - (rankOrder[a.subscriptionType] ?? 0);
-      return rankDiff !== 0 ? rankDiff : b.averageRating - a.averageRating;
-    });
+    candidates.sort((a, b) => b.averageRating - a.averageRating);
 
-    return {
-      subjectId: 1,
-      candidates: candidates.slice(0, 5),
-    };
+    return { subjectId: 1, candidates };
   }
 
   async createBooking(payload: CreateBookingPayload): Promise<BookingDto> {
