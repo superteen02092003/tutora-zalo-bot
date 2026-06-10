@@ -1,10 +1,10 @@
 import { HttpService } from '@nestjs/axios';
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { lastValueFrom } from 'rxjs';
 import { TutorCandidateDto } from '../be-client/dto';
 import { RedisService } from '../common/redis/redis.service';
 import { TutorCardImageService } from './tutor-card-image.service';
+import { ZaloTokenService } from './zalo-token.service';
 import { ListElement, QuickReplyOption } from './zalo.types';
 
 const TUTOR_CARD_ATTACHMENT_TTL = 3 * 24 * 60 * 60; // 3 days
@@ -17,18 +17,13 @@ const ZALO_ZBS_TEMPLATE_URL = 'https://openapi.zalo.me/v3.0/oa/message/template'
 @Injectable()
 export class ZaloService {
   private readonly logger = new Logger(ZaloService.name);
-  private readonly accessToken?: string;
-  private readonly stubMode: boolean;
 
   constructor(
     private readonly http: HttpService,
     private readonly tutorCardImage: TutorCardImageService,
     private readonly redis: RedisService,
-    config: ConfigService,
-  ) {
-    this.accessToken = config.get<string>('zalo.accessToken');
-    this.stubMode = config.get<boolean>('stubMode', true);
-  }
+    private readonly tokenService: ZaloTokenService,
+  ) {}
 
   // ── Plain text ────────────────────────────────────────────────────────────
 
@@ -58,7 +53,8 @@ export class ZaloService {
     image: Buffer,
     filename = 'image.png',
   ): Promise<string> {
-    if (!this.accessToken) {
+    const accessToken = await this.tokenService.getAccessToken();
+    if (!accessToken) {
       this.logger.debug(`[stub/upload-image] ${filename} (${image.length} bytes)`);
       return 'stub-attachment-id';
     }
@@ -73,7 +69,7 @@ export class ZaloService {
     this.logger.log(`Uploading Zalo image ${filename} (${image.length} bytes)`);
     const res = await lastValueFrom(
       this.http.post(ZALO_UPLOAD_IMAGE_URL, form, {
-        headers: { access_token: this.accessToken },
+        headers: { access_token: accessToken },
       }),
     );
     this.logger.log(`Zalo upload image response: ${JSON.stringify(res.data)}`);
@@ -120,7 +116,8 @@ export class ZaloService {
     templateId: string,
     templateData: Record<string, string | number>,
   ): Promise<void> {
-    if (!this.accessToken) {
+    const accessToken = await this.tokenService.getAccessToken();
+    if (!accessToken) {
       this.logger.debug(
         `[stub/zbs-template] to ${userId}: ${JSON.stringify({ templateId, templateData })}`,
       );
@@ -137,7 +134,7 @@ export class ZaloService {
             template_id: templateId,
             template_data: templateData,
           },
-          { headers: { access_token: this.accessToken } },
+          { headers: { access_token: accessToken } },
         ),
       );
       this.logger.log(`ZBS template response: ${JSON.stringify(res.data)}`);
@@ -353,7 +350,8 @@ export class ZaloService {
   ): Promise<void> {
     const endpoint = url === ZALO_PROMO_URL ? 'promotion' : 'cs';
 
-    if (!this.accessToken) {
+    const accessToken = await this.tokenService.getAccessToken();
+    if (!accessToken) {
       this.logger.debug(
         `[stub/${endpoint}] to ${userId}: ${JSON.stringify(message)}`,
       );
@@ -366,7 +364,7 @@ export class ZaloService {
         this.http.post(
           url,
           { recipient: { user_id: userId }, message },
-          { headers: { access_token: this.accessToken } },
+          { headers: { access_token: accessToken } },
         ),
       );
       this.logger.log(`Zalo API [${endpoint}] response: ${JSON.stringify(res.data)}`);

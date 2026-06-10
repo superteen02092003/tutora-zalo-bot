@@ -2,6 +2,9 @@ export default () => ({
   port: parseInt(process.env.PORT ?? '3000', 10),
   zalo: {
     accessToken: process.env.ZALO_OA_ACCESS_TOKEN,
+    refreshToken: process.env.ZALO_OA_REFRESH_TOKEN,
+    appId: process.env.ZALO_APP_ID,
+    appSecret: process.env.ZALO_APP_SECRET,
     webhookSecret: process.env.ZALO_WEBHOOK_SECRET,
     siteVerification: process.env.ZALO_SITE_VERIFICATION,
   },

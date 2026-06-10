@@ -5,12 +5,13 @@ import { CalendarController } from './calendar.controller';
 import { CalendarImageService } from './calendar-image.service';
 import { TutorCardImageService } from './tutor-card-image.service';
 import { ZaloService } from './zalo.service';
+import { ZaloTokenService } from './zalo-token.service';
 import { ZnsService } from './zns.service';
 
 @Module({
   imports: [HttpModule, RedisModule],
   controllers: [CalendarController],
-  providers: [ZaloService, ZnsService, CalendarImageService, TutorCardImageService],
+  providers: [ZaloService, ZaloTokenService, ZnsService, CalendarImageService, TutorCardImageService],
   exports: [ZaloService, ZnsService, CalendarImageService, TutorCardImageService],
 })
 export class ZaloModule {}

@@ -17,6 +17,9 @@ import { ZaloModule } from './zalo/zalo.module';
       load: [configuration],
       validationSchema: Joi.object({
         ZALO_OA_ACCESS_TOKEN: Joi.string().allow('').optional(),
+        ZALO_OA_REFRESH_TOKEN: Joi.string().allow('').optional(),
+        ZALO_APP_ID: Joi.string().allow('').optional(),
+        ZALO_APP_SECRET: Joi.string().allow('').optional(),
         ZALO_WEBHOOK_SECRET: Joi.string().allow('').optional(),
         BE_INTERNAL_BASE_URL: Joi.string()
           .uri()
