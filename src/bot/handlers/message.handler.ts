@@ -45,8 +45,14 @@ export class MessageHandler {
 
     const candidates = await this.state.getMatchingCandidates<TutorCandidateDto>(userId);
 
-    // Các nút bấm (oa.query.hide) gửi payload có cấu trúc dưới dạng text.
-    // Route thẳng, KHÔNG qua LLM — nhanh và chính xác tuyệt đối.
+    // Direct triggers — bypass LLM hoàn toàn.
+    const FIND_TUTOR_TRIGGERS = ['#timgiasu', 'onboarding:start', 'tìm gia sư', 'tìm giasư'];
+    if (FIND_TUTOR_TRIGGERS.includes(text.toLowerCase().trim())) {
+      await this.onboardingFlow.start(userId);
+      return;
+    }
+
+    // Structured payloads từ nút bấm (oa.query.hide) — route thẳng, không qua LLM.
     if (text.startsWith('onboarding:')) {
       await this.onboardingFlow.handlePostbackInput(userId, text);
       return;
