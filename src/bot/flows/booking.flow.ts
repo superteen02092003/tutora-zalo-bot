@@ -390,7 +390,7 @@ export class BookingFlow {
       subjectId: context.subjectId,
       sessionCount: context.selectedPackageSessionCount,
       schedule,
-      locationDistrict: context.criteria.locationDistrict,
+      locationDistrict: context.criteria.locationDistrict ?? '',
       teachingMode: 'online',
       depositAmount: 400000,
     });
