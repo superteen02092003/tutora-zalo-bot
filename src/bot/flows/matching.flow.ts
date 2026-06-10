@@ -29,7 +29,11 @@ export class MatchingFlow {
     const context = await this.state.getContext(zaloUserId);
 
     if (!context.criteria) {
-      await this.zalo.sendText(zaloUserId, 'Mình cần thêm thông tin để tìm gia sư.');
+      const lang = context.preferredLanguage ?? 'vi';
+      await this.zalo.sendText(
+        zaloUserId,
+        lang === 'en' ? 'I need a bit more information to find tutors.' : 'Mình cần thêm thông tin để tìm gia sư.',
+      );
       return;
     }
 
@@ -37,10 +41,14 @@ export class MatchingFlow {
     await this.state.updateContext(zaloUserId, { subjectId: result.subjectId });
     await this.state.setMatchingCandidates(zaloUserId, result.candidates);
 
+    const lang = context.preferredLanguage ?? 'vi';
+
     if (result.candidates.length === 0) {
       await this.zalo.sendText(
         zaloUserId,
-        'Hiện chưa tìm thấy gia sư phù hợp. Tutora sẽ liên hệ lại khi có ứng viên mới.',
+        lang === 'en'
+          ? 'No matching tutors found at the moment. Tutora will reach out when new tutors are available.'
+          : 'Hiện chưa tìm thấy gia sư phù hợp. Tutora sẽ liên hệ lại khi có ứng viên mới.',
       );
       return;
     }
@@ -51,11 +59,13 @@ export class MatchingFlow {
     try {
       await this.zalo.sendText(
         zaloUserId,
-        `Tutora tìm thấy ${result.candidates.length} gia sư phù hợp! Đây là ${displayed.length} gợi ý ở các mức học phí khác nhau:`,
+        lang === 'en'
+          ? `Tutora found ${result.candidates.length} matching tutor(s)! Here are ${displayed.length} recommendations across different price ranges:`
+          : `Tutora tìm thấy ${result.candidates.length} gia sư phù hợp! Đây là ${displayed.length} gợi ý ở các mức học phí khác nhau:`,
       );
 
       for (const candidate of displayed) {
-        await this.zalo.sendTutorCard(zaloUserId, candidate, this.tutorProfileBaseUrl);
+        await this.zalo.sendTutorCard(zaloUserId, candidate, this.tutorProfileBaseUrl, lang);
       }
 
       await this.state.transitionState(zaloUserId, ConversationState.Matched);
@@ -63,7 +73,9 @@ export class MatchingFlow {
       this.logger.error(`Failed to send tutor cards for ${zaloUserId}: ${String(error)}`);
       await this.zalo.sendText(
         zaloUserId,
-        'Mình gặp sự cố khi hiển thị danh sách gia sư. Bạn thử lại sau nhé.',
+        lang === 'en'
+          ? 'Something went wrong while displaying tutors. Please try again later.'
+          : 'Mình gặp sự cố khi hiển thị danh sách gia sư. Bạn thử lại sau nhé.',
       );
     }
   }

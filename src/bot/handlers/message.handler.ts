@@ -10,6 +10,12 @@ import { OnboardingFlow } from '../flows/onboarding.flow';
 import { ConversationContext } from '../state/conversation-context.interface';
 import { ConversationStateService } from '../state/conversation-state.service';
 
+function detectLanguage(text: string): 'vi' | 'en' {
+  return /[àáâãèéêìíòóôõùúăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ]/i.test(text)
+    ? 'vi'
+    : 'en';
+}
+
 @Injectable()
 export class MessageHandler {
   private readonly logger = new Logger(MessageHandler.name);
@@ -43,6 +49,14 @@ export class MessageHandler {
       if (handled) return;
     }
 
+    // Auto-detect language from natural-language messages (skip commands/postbacks).
+    if (text && !text.startsWith('#') && !text.startsWith('onboarding:') && !text.startsWith('select_tutor:')) {
+      const detectedLang = detectLanguage(text);
+      if (detectedLang !== context.preferredLanguage) {
+        await this.state.updateContext(userId, { preferredLanguage: detectedLang });
+      }
+    }
+
     const candidates = await this.state.getMatchingCandidates<TutorCandidateDto>(userId);
 
     // Direct triggers — bypass LLM hoàn toàn.
@@ -59,11 +73,17 @@ export class MessageHandler {
     }
     if (text.startsWith('select_tutor:')) {
       const tutorId = text.slice('select_tutor:'.length);
+      const updatedCtx = await this.state.getContext(userId);
       const tutor = candidates.find((c) => c.tutorId === tutorId);
       if (tutor) {
-        await this.handleTutorSelected(userId, tutor);
+        await this.handleTutorSelected(userId, tutor, updatedCtx);
       } else {
-        await this.zalo.sendText(userId, 'Mình không tìm thấy gia sư này. Bạn thử chọn lại nhé?');
+        await this.zalo.sendText(
+          userId,
+          updatedCtx.preferredLanguage === 'en'
+            ? "Couldn't find that tutor. Please select again."
+            : 'Mình không tìm thấy gia sư này. Bạn thử chọn lại nhé?',
+        );
       }
       return;
     }
@@ -95,10 +115,15 @@ export class MessageHandler {
           c.fullName.toLowerCase().includes(decision.tutorName.toLowerCase()),
         );
         if (!tutor) {
-          await this.zalo.sendText(userId, `Mình không tìm thấy gia sư "${decision.tutorName}" trong danh sách. Bạn chọn lại nhé?`);
+          await this.zalo.sendText(
+            userId,
+            context.preferredLanguage === 'en'
+              ? `Couldn't find tutor "${decision.tutorName}" in the list. Please select again.`
+              : `Mình không tìm thấy gia sư "${decision.tutorName}" trong danh sách. Bạn chọn lại nhé?`,
+          );
           return;
         }
-        await this.handleTutorSelected(userId, tutor);
+        await this.handleTutorSelected(userId, tutor, context);
         break;
       }
 
@@ -106,8 +131,12 @@ export class MessageHandler {
         await this.state.updateContext(userId, { selectedPackageSessionCount: decision.sessionCount });
         await this.zalo.sendNumberedList(
           userId,
-          `Đã chọn ${decision.sessionCount} buổi! Bạn muốn học mấy buổi mỗi tuần?`,
-          [{ label: '2 buổi/tuần' }, { label: '3 buổi/tuần' }],
+          context.preferredLanguage === 'en'
+            ? `Selected ${decision.sessionCount} sessions! How many sessions per week?`
+            : `Đã chọn ${decision.sessionCount} buổi! Bạn muốn học mấy buổi mỗi tuần?`,
+          context.preferredLanguage === 'en'
+            ? [{ label: '2 sessions/week' }, { label: '3 sessions/week' }]
+            : [{ label: '2 buổi/tuần' }, { label: '3 buổi/tuần' }],
         );
         break;
 
@@ -117,7 +146,9 @@ export class MessageHandler {
         });
         await this.zalo.sendText(
           userId,
-          'Tutora đã ghi nhận. Nhân viên Tutora sẽ liên hệ để xác nhận lịch và gửi thông tin thanh toán cho bạn sớm nhé!',
+          context.preferredLanguage === 'en'
+            ? "Got it! Tutora's team will reach out to confirm your schedule and send payment details."
+            : 'Tutora đã ghi nhận. Nhân viên Tutora sẽ liên hệ để xác nhận lịch và gửi thông tin thanh toán cho bạn sớm nhé!',
         );
         break;
 
@@ -133,39 +164,60 @@ export class MessageHandler {
       default:
         await this.zalo.sendText(
           userId,
-          (decision as { reply?: string }).reply ?? 'Mình chưa hiểu ý bạn. Bạn muốn tìm gia sư hay cần hỗ trợ gì?',
+          (decision as { reply?: string }).reply ??
+            (context.preferredLanguage === 'en'
+              ? "I didn't quite understand. Would you like to find a tutor or need other help?"
+              : 'Mình chưa hiểu ý bạn. Bạn muốn tìm gia sư hay cần hỗ trợ gì?'),
         );
         break;
     }
   }
 
-  private async handleTutorSelected(userId: string, tutor: TutorCandidateDto): Promise<void> {
+  private async handleTutorSelected(userId: string, tutor: TutorCandidateDto, context?: ConversationContext): Promise<void> {
     await this.state.updateContext(userId, {
       selectedTutorId: tutor.tutorId,
       selectedTutorName: tutor.fullName,
     });
+    const lang = context?.preferredLanguage ?? 'vi';
     await this.zalo.sendNumberedList(
       userId,
-      `Bạn đã chọn ${tutor.fullName}! Bạn muốn học gói bao nhiêu buổi?`,
-      [
-        { label: '4 buổi', hint: 'thử nghiệm' },
-        { label: '8 buổi', hint: 'phổ biến' },
-        { label: '12 buổi', hint: 'tiết kiệm nhất' },
-      ],
+      lang === 'en'
+        ? `You selected ${tutor.fullName}! How many sessions would you like?`
+        : `Bạn đã chọn ${tutor.fullName}! Bạn muốn học gói bao nhiêu buổi?`,
+      lang === 'en'
+        ? [
+            { label: '4 sessions', hint: 'trial' },
+            { label: '8 sessions', hint: 'popular' },
+            { label: '12 sessions', hint: 'best value' },
+          ]
+        : [
+            { label: '4 buổi', hint: 'thử nghiệm' },
+            { label: '8 buổi', hint: 'phổ biến' },
+            { label: '12 buổi', hint: 'tiết kiệm nhất' },
+          ],
     );
   }
 
   private buildStatusMessage(context: ConversationContext): string {
+    const en = context.preferredLanguage === 'en';
     if (context.activeBookingId) {
-      return `Lịch học của bạn đang hoạt động (booking #${context.activeBookingId}). Bạn cần hỗ trợ gì?`;
+      return en
+        ? `Your lesson schedule is active (booking #${context.activeBookingId}). How can I help?`
+        : `Lịch học của bạn đang hoạt động (booking #${context.activeBookingId}). Bạn cần hỗ trợ gì?`;
     }
     if (context.selectedTutorName) {
-      return `Bạn đang trong quá trình đặt lịch với ${context.selectedTutorName}. Bạn muốn tiếp tục không?`;
+      return en
+        ? `You're in the process of booking with ${context.selectedTutorName}. Would you like to continue?`
+        : `Bạn đang trong quá trình đặt lịch với ${context.selectedTutorName}. Bạn muốn tiếp tục không?`;
     }
     if (context.criteria?.subject) {
-      return `Bạn đang tìm gia sư môn ${context.criteria.subject}. Bạn muốn xem lại danh sách gia sư không?`;
+      return en
+        ? `You're looking for a ${context.criteria.subject} tutor. Would you like to view the tutor list again?`
+        : `Bạn đang tìm gia sư môn ${context.criteria.subject}. Bạn muốn xem lại danh sách gia sư không?`;
     }
-    return 'Hiện bạn chưa có lịch học nào. Bạn muốn tìm gia sư không?';
+    return en
+      ? "You don't have any active lessons yet. Would you like to find a tutor?"
+      : 'Hiện bạn chưa có lịch học nào. Bạn muốn tìm gia sư không?';
   }
 
   private async handleAdminCommand(adminId: string, text: string): Promise<boolean> {

@@ -61,7 +61,7 @@ export class TutorCardImageService implements OnModuleInit {
     }
   }
 
-  async generate(tutor: TutorCandidateDto): Promise<Buffer> {
+  async generate(tutor: TutorCandidateDto, language: 'vi' | 'en' = 'vi'): Promise<Buffer> {
     const { createCanvas, loadImage } = await import('@napi-rs/canvas');
     const canvas = createCanvas(W, H);
     const ctx = canvas.getContext('2d');
@@ -125,7 +125,9 @@ export class TutorCardImageService implements OnModuleInit {
     ctx.fillText(truncate(ctx, tutor.fullName, W_L - PAD_L * 2), AV_CX, nameY);
 
     // Credential (up to 2 lines, split at bullet)
-    const genderLabel = tutor.gender === 'male' ? 'Thầy' : tutor.gender === 'female' ? 'Cô' : '';
+    const genderLabel = language === 'en'
+      ? (tutor.gender === 'male' ? 'Mr.' : tutor.gender === 'female' ? 'Ms.' : '')
+      : (tutor.gender === 'male' ? 'Thầy' : tutor.gender === 'female' ? 'Cô' : '');
     const credential = [genderLabel, tutor.education].filter(Boolean).join('  •  ');
     if (credential) {
       ctx.fillStyle = C.creamOnNavy;
@@ -141,7 +143,7 @@ export class TutorCardImageService implements OnModuleInit {
     }
 
     // Tier badge (centered, bottom of left panel)
-    this.drawTierBadgeCenter(ctx, tutor.subscriptionType);
+    this.drawTierBadgeCenter(ctx, tutor.subscriptionType, language);
 
     // ── RIGHT PANEL ───────────────────────────────────────────────────────
 
@@ -152,7 +154,8 @@ export class TutorCardImageService implements OnModuleInit {
     }
     if (tutor.grades?.length) {
       const g = tutor.grades;
-      const gradeLabel = g.length > 1 ? `Lớp ${g[0]}–${g[g.length - 1]}` : `Lớp ${g[0]}`;
+      const gradePrefix = language === 'en' ? 'Grade' : 'Lớp';
+      const gradeLabel = g.length > 1 ? `${gradePrefix} ${g[0]}–${g[g.length - 1]}` : `${gradePrefix} ${g[0]}`;
       this.drawTag(ctx, bx, 44, 32, gradeLabel, 'rgba(26,34,56,0.07)', C.navy, 'rgba(26,34,56,0.18)');
     }
 
@@ -177,7 +180,8 @@ export class TutorCardImageService implements OnModuleInit {
     const sw = ctx.measureText(scoreText).width;
     ctx.font = `400 13px "${SANS}"`;
     ctx.fillStyle = C.brown45;
-    ctx.fillText(`/5  ·  ${tutor.totalReviews} đánh giá`, RP_X + 120 + sw + 2, ratingY);
+    const reviewsLabel = language === 'en' ? 'reviews' : 'đánh giá';
+    ctx.fillText(`/5  ·  ${tutor.totalReviews} ${reviewsLabel}`, RP_X + 120 + sw + 2, ratingY);
 
     // Separator 2
     ctx.fillStyle = C.line;
@@ -193,7 +197,9 @@ export class TutorCardImageService implements OnModuleInit {
     ctx.fillStyle = C.brown70;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    const hoursText = `${tutor.completedHours} giờ dạy`;
+    const hoursText = language === 'en'
+      ? `${tutor.completedHours} teaching hrs`
+      : `${tutor.completedHours} giờ dạy`;
     ctx.fillText(hoursText, RP_X, hoursY);
     const htw = ctx.measureText(hoursText).width;
     ctx.fillStyle = 'rgba(62,47,40,0.15)';
@@ -218,7 +224,7 @@ export class TutorCardImageService implements OnModuleInit {
     const pnw = ctx.measureText(priceNum).width;
     ctx.font = `400 14px "${SANS}"`;
     ctx.fillStyle = C.brown45;
-    ctx.fillText('đ / giờ', RP_X + 20 + pnw + 10, priceCY + 3);
+    ctx.fillText(language === 'en' ? 'đ / hr' : 'đ / giờ', RP_X + 20 + pnw + 10, priceCY + 3);
 
     ctx.restore();
 
@@ -257,16 +263,10 @@ export class TutorCardImageService implements OnModuleInit {
     fillTracked(ctx, label, x + 20, y + h / 2 + 0.5, sp);
   }
 
-  private drawTierBadgeCenter(ctx: Ctx, tier?: string): void {
-    const labels: Record<string, string> = {
-      standard: 'TIÊU CHUẨN',
-      free: 'TIÊU CHUẨN',
-      pro: 'PRO',
-      guided: 'PRO',
-      premium: 'PREMIUM',
-      intensive: 'PREMIUM',
-      elite: 'ELITE',
-    };
+  private drawTierBadgeCenter(ctx: Ctx, tier?: string, language: 'vi' | 'en' = 'vi'): void {
+    const labels: Record<string, string> = language === 'en'
+      ? { standard: 'STANDARD', free: 'STANDARD', pro: 'PRO', guided: 'PRO', premium: 'PREMIUM', intensive: 'PREMIUM', elite: 'ELITE' }
+      : { standard: 'TIÊU CHUẨN', free: 'TIÊU CHUẨN', pro: 'PRO', guided: 'PRO', premium: 'PREMIUM', intensive: 'PREMIUM', elite: 'ELITE' };
     if (!tier || !labels[tier]) return;
     const label = labels[tier];
     const sp = 1.5;

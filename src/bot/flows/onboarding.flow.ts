@@ -24,6 +24,7 @@ export class OnboardingFlow {
   async start(
     zaloUserId: string,
     profile?: { fullName?: string; avatarUrl?: string },
+    language?: 'vi' | 'en',
   ): Promise<void> {
     const user =
       (await this.beClient.getUserByZaloId(zaloUserId)) ??
@@ -33,14 +34,17 @@ export class OnboardingFlow {
         profile?.avatarUrl,
       ));
 
+    const existingCtx = await this.state.getContext(zaloUserId);
+    const preferredLanguage: BotLanguage = language ?? existingCtx.preferredLanguage ?? 'vi';
+
     await this.state.setContext(zaloUserId, {
       zaloUserId,
       parentId: user.userId,
-      preferredLanguage: 'vi',
+      preferredLanguage,
       onboardingStep: 'subject',
     });
     await this.state.setState(zaloUserId, ConversationState.Onboarding);
-    await this.askSubject(zaloUserId, 'vi');
+    await this.askSubject(zaloUserId, preferredLanguage);
   }
 
   async handlePostbackInput(zaloUserId: string, payload: string): Promise<void> {

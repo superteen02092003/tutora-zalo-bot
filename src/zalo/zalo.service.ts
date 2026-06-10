@@ -288,17 +288,18 @@ export class ZaloService {
     userId: string,
     tutor: TutorCandidateDto,
     profileBaseUrl: string,
+    language: 'vi' | 'en' = 'vi',
   ): Promise<void> {
-    const cacheKey = `tutor_card_attachment:${tutor.tutorId}`;
+    const cacheKey = `tutor_card_attachment:${tutor.tutorId}:${language}`;
     let attachmentId = await this.redis.getClient().get(cacheKey);
 
     if (!attachmentId) {
-      const cardBuffer = await this.tutorCardImage.generate(tutor);
+      const cardBuffer = await this.tutorCardImage.generate(tutor, language);
       attachmentId = await this.uploadImageBuffer(cardBuffer, `tutor-${tutor.tutorId}.png`);
       await this.redis.getClient().setex(cacheKey, TUTOR_CARD_ATTACHMENT_TTL, attachmentId);
-      this.logger.log(`Tutor card cached: ${tutor.tutorId} → ${attachmentId}`);
+      this.logger.log(`Tutor card cached: ${tutor.tutorId}:${language} → ${attachmentId}`);
     } else {
-      this.logger.log(`Tutor card cache hit: ${tutor.tutorId}`);
+      this.logger.log(`Tutor card cache hit: ${tutor.tutorId}:${language}`);
     }
 
     await this.sendUploadedImage(userId, attachmentId);
@@ -312,12 +313,12 @@ export class ZaloService {
         payload: {
           buttons: [
             {
-              title: 'Xem chi tiết',
+              title: language === 'en' ? 'View profile' : 'Xem chi tiết',
               type: 'oa.open.url',
               payload: { url: profileUrl },
             },
             {
-              title: 'Đặt lịch',
+              title: language === 'en' ? 'Book session' : 'Đặt lịch',
               type: 'oa.query.hide',
               payload: `select_tutor:${tutor.tutorId}`,
             },
