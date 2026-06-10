@@ -72,11 +72,17 @@ export class BeClientService {
       return this.get<SubjectDto[]>('/internal/subjects');
     }
 
-    // TODO: remove stub when BE implements GET /internal/subjects
     return [
-      { subjectId: 1, name: 'Toán' },
-      { subjectId: 2, name: 'Văn' },
-      { subjectId: 3, name: 'Tiếng Anh' },
+      { subjectId: 1, name: 'Toán Học' },
+      { subjectId: 2, name: 'Tiếng Anh' },
+      { subjectId: 3, name: 'Vật Lý' },
+      { subjectId: 4, name: 'Hóa Học' },
+      { subjectId: 5, name: 'Ngữ văn' },
+      { subjectId: 6, name: 'Sinh Học' },
+      { subjectId: 7, name: 'Lịch Sử' },
+      { subjectId: 8, name: 'Địa Lý' },
+      { subjectId: 9, name: 'Tin Học' },
+      { subjectId: 10, name: 'IELTS' },
     ];
   }
 

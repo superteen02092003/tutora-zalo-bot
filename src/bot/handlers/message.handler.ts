@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { BeClientService } from '../../be-client/be-client.service';
+import { SubjectCacheService } from '../../be-client/subject-cache.service';
 import { ZaloWebhookEvent } from '../../webhook/zalo-event.dto';
 import { getMessageText, getZaloUserId } from '../../webhook/zalo-event.utils';
 import { ZaloService } from '../../zalo/zalo.service';
@@ -16,6 +17,7 @@ export class MessageHandler {
     private readonly state: ConversationStateService,
     private readonly zalo: ZaloService,
     private readonly beClient: BeClientService,
+    private readonly subjectCache: SubjectCacheService,
     config: ConfigService,
   ) {
     this.adminUserIds = new Set(config.get<string[]>('adminZaloUserIds') ?? []);
@@ -70,8 +72,10 @@ export class MessageHandler {
   ): Promise<void> {
     switch (context.findTutorStep) {
       case 'awaiting_subject': {
+        const matched = await this.subjectCache.normalize(text);
+        const subject = matched?.name ?? text;
         await this.state.updateContext(zaloUserId, {
-          subject: text,
+          subject,
           findTutorStep: 'awaiting_grade',
         });
         await this.zalo.sendText(zaloUserId, 'Học sinh đang học lớp mấy ạ? (ví dụ: 5, 9, 11)');

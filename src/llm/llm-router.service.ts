@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
+import { SubjectCacheService } from '../be-client/subject-cache.service';
 import { TutorCandidateDto } from '../be-client/dto';
 import { ConversationContext } from '../bot/state/conversation-context.interface';
 import { ConversationState } from '../bot/state/conversation-state.enum';
@@ -12,7 +13,10 @@ export class LlmRouterService {
   private readonly client?: OpenAI;
   private readonly model: string;
 
-  constructor(config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    private readonly subjectCache: SubjectCacheService,
+  ) {
     const apiKey = config.get<string>('deepseek.apiKey');
     const baseURL = config.get<string>('deepseek.baseUrl');
     this.model = config.get<string>('deepseek.model', 'deepseek-v4-flash');
@@ -32,12 +36,13 @@ export class LlmRouterService {
     }
 
     try {
+      const subjectNames = await this.subjectCache.getNames();
       const response = await this.client.chat.completions.create({
         model: this.model,
         response_format: { type: 'json_object' },
         temperature: 0.1,
         messages: [
-          { role: 'system', content: this.buildSystemPrompt(params) },
+          { role: 'system', content: this.buildSystemPrompt({ ...params, subjectNames }) },
           { role: 'user', content: params.message },
         ],
       });
@@ -52,8 +57,9 @@ export class LlmRouterService {
     state: ConversationState;
     context: ConversationContext;
     candidates: TutorCandidateDto[];
+    subjectNames: string[];
   }): string {
-    const { state, context, candidates } = params;
+    const { state, context, candidates, subjectNames } = params;
     const currentQuestion = this.deriveCurrentQuestion(state, context);
     const collectedSlots = this.summarizeCollectedSlots(context);
     const candidateList =
@@ -84,7 +90,7 @@ DANH SÁCH ACTION:
 
 Slot rules (chỉ fill slot đang được hỏi):
   • language → "vi" nếu user chọn Tiếng Việt/Vietnamese, "en" nếu user chọn English/tiếng Anh
-  • subject → tên môn học chuẩn: Toán, Văn, Tiếng Anh, Lý, Hóa, Sinh, Sử, Địa, Tin, IELTS, Toán THPT, ...
+  • subject → PHẢI chọn đúng 1 trong danh sách (không được tự tạo giá trị khác): ${subjectNames.join(', ')}
   • grade   → "Lop X" với X = 1–12 (ví dụ user nói "lớp 11" → "Lop 11")
   • area    → tên quận/huyện/thành phố nguyên văn (ví dụ "Bình Thạnh", "Quận 1", "Thủ Đức")
   • budget  → một trong: "150000" (<150k / rẻ / tùy), "250000" (150–250k / vừa), "350000" (>250k / cao)

@@ -10,10 +10,10 @@ export class WebhookController {
   @Post('zalo')
   async handleZaloWebhook(
     @Body() body: ZaloWebhookEvent,
-    @Headers('x-zalooa-signature') signature: string | undefined,
+    @Headers('x-zevent-signature') signature: string | undefined,
     @Req() request: Request & RequestWithRawBody,
   ): Promise<{ ok: true }> {
-    this.webhookService.verifyZaloSignature(signature, request.rawBody);
+    this.webhookService.verifyZaloSignature(signature, request.rawBody, body);
     await this.webhookService.dispatchZaloEvent(body);
     return { ok: true };
   }

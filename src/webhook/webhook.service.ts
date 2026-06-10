@@ -5,7 +5,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createHmac, timingSafeEqual } from 'crypto';
+import { createHash, timingSafeEqual } from 'crypto';
 import { BeEventDto } from '../be-client/dto';
 import { BeEventHandler } from '../bot/handlers/be-event.handler';
 import { FollowHandler } from '../bot/handlers/follow.handler';
@@ -34,7 +34,11 @@ export class WebhookService {
     this.stubMode = config.get<boolean>('stubMode', true);
   }
 
-  verifyZaloSignature(signature: string | undefined, rawBody?: Buffer): void {
+  verifyZaloSignature(
+    signature: string | undefined,
+    rawBody: Buffer | undefined,
+    body: ZaloWebhookEvent,
+  ): void {
     if (this.stubMode && !this.zaloWebhookSecret) {
       return;
     }
@@ -43,11 +47,19 @@ export class WebhookService {
       throw new UnauthorizedException('Missing Zalo webhook signature');
     }
 
-    const expectedSignature = createHmac('sha256', this.zaloWebhookSecret)
-      .update(rawBody)
+    // Zalo OA signature: SHA256(appId + data + timestamp + OASecretKey)
+    // header format: "mac=<hash>"; data = raw request body string.
+    const mac = signature.startsWith('mac=') ? signature.slice(4) : signature;
+    const appId = String(body.app_id ?? '');
+    const timestamp = String(body.timestamp ?? '');
+    const expectedSignature = createHash('sha256')
+      .update(appId + rawBody.toString('utf8') + timestamp + this.zaloWebhookSecret)
       .digest('hex');
 
-    if (!this.safeEqual(signature, expectedSignature)) {
+    if (!this.safeEqual(mac, expectedSignature)) {
+      this.logger.warn(
+        `Zalo signature mismatch | received=${mac} expected=${expectedSignature} appId=${appId} ts=${timestamp}`,
+      );
       throw new UnauthorizedException('Invalid Zalo webhook signature');
     }
   }

@@ -202,7 +202,7 @@ export class ZaloService {
               buttons: element.buttons.slice(0, 3).map((btn) => ({
                 title: btn.title,
                 type: btn.type === 'url' ? 'oa.open.url' : 'oa.query.hide',
-                payload: btn.payload,
+                payload: btn.type === 'url' ? { url: btn.payload } : btn.payload,
               })),
             },
           },
@@ -270,7 +270,7 @@ export class ZaloService {
       const buttons = (element.buttons ?? []).slice(0, 3).map((btn) => ({
         title: btn.title,
         type: btn.type === 'url' ? 'oa.open.url' : 'oa.query.hide',
-        payload: btn.payload,
+        payload: btn.type === 'url' ? { url: btn.payload } : btn.payload,
       }));
 
       if (buttons.length > 0) {
@@ -317,7 +317,7 @@ export class ZaloService {
             {
               title: 'Xem chi tiết',
               type: 'oa.open.url',
-              payload: profileUrl,
+              payload: { url: profileUrl },
             },
             {
               title: 'Đặt lịch',
