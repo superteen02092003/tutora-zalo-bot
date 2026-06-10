@@ -141,7 +141,10 @@ export class BeClientService {
     if (criteria.subject) {
       const subjectLower = criteria.subject.toLowerCase();
       candidates = candidates.filter((t) =>
-        t.subjects?.some((s: string) => s.toLowerCase().includes(subjectLower)),
+        t.subjects?.some((s: string) => {
+          const sl = s.toLowerCase();
+          return sl.includes(subjectLower) || subjectLower.includes(sl);
+        }),
       );
     }
 
