@@ -10,6 +10,7 @@ import { OnboardingFlow } from '../bot/flows/onboarding.flow';
 import { LlmModule } from '../llm/llm.module';
 import { ZaloModule } from '../zalo/zalo.module';
 import { BeEventsController } from './be-events.controller';
+import { UserSerialQueue } from './user-serial-queue.service';
 import { WebhookController } from './webhook.controller';
 import { WebhookService } from './webhook.service';
 
@@ -24,6 +25,7 @@ import { WebhookService } from './webhook.service';
     BeEventHandler,
     OnboardingFlow,
     MatchingFlow,
+    UserSerialQueue,
   ],
 })
 export class WebhookModule {}

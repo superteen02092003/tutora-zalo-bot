@@ -43,9 +43,26 @@ export class MessageHandler {
       if (handled) return;
     }
 
-    const convState = await this.state.getState(userId);
     const candidates = await this.state.getMatchingCandidates<TutorCandidateDto>(userId);
 
+    // Các nút bấm (oa.query.hide) gửi payload có cấu trúc dưới dạng text.
+    // Route thẳng, KHÔNG qua LLM — nhanh và chính xác tuyệt đối.
+    if (text.startsWith('onboarding:')) {
+      await this.onboardingFlow.handlePostbackInput(userId, text);
+      return;
+    }
+    if (text.startsWith('select_tutor:')) {
+      const tutorId = text.slice('select_tutor:'.length);
+      const tutor = candidates.find((c) => c.tutorId === tutorId);
+      if (tutor) {
+        await this.handleTutorSelected(userId, tutor);
+      } else {
+        await this.zalo.sendText(userId, 'Mình không tìm thấy gia sư này. Bạn thử chọn lại nhé?');
+      }
+      return;
+    }
+
+    const convState = await this.state.getState(userId);
     const decision = await this.llmRouter.decide({ message: text, state: convState, context, candidates });
     this.logger.debug(`LLM decision | user=${userId} | ${JSON.stringify(decision)}`);
 
