@@ -93,7 +93,7 @@ Slot rules (chỉ fill slot đang được hỏi):
   • subject  → PHẢI chọn đúng 1 trong danh sách (không được tự tạo giá trị khác): ${subjectNames.join(', ')}
   • grade    → "Lop X" với X = 1–12 (ví dụ user nói "lớp 11" → "Lop 11")
   • mode     → "online" (trực tuyến/online/qua video), "offline" (tại nhà/gặp trực tiếp/face-to-face), "both" (linh hoạt/cả hai/đều được)
-  • area     → tên quận/huyện/thành phố nguyên văn (ví dụ "Bình Thạnh", "Quận 1", "Thủ Đức")
+  • area     → chuẩn hóa về tên quận/huyện đầy đủ bằng cách suy luận từ input (D2→"Quận 2", BT→"Bình Thạnh", v.v.)
   • purpose  → "exam_prep" (ôn thi/thi vào 10/THPT quốc gia/thi đại học/luyện thi), "regular" (học thêm/học bình thường/theo chương trình), "foundation" (lấy lại nền/học lại từ đầu/mất căn bản), "advanced" (nâng cao/học sinh giỏi/HSG/phát triển tư duy)
 
 [B] User muốn tìm gia sư (không đang trong onboarding):
