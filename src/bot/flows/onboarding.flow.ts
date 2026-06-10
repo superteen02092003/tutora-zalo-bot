@@ -149,16 +149,26 @@ export class OnboardingFlow {
     preferredLanguage: BotLanguage,
   ): Promise<void> {
     const subjects = await this.beClient.getSubjects();
+    // Cap at 9 buttons (3 messages × 3) to avoid message spam
+    const displayed = subjects.slice(0, 9);
     await this.zalo.sendInteractiveQuickReply(
       zaloUserId,
       preferredLanguage === 'en'
         ? 'Tutora will help you find a suitable tutor. Which subject would you like to study?'
         : 'Tutora sẽ giúp bạn tìm gia sư phù hợp. Bạn muốn học môn nào?',
-      subjects.map((subject) => ({
+      displayed.map((subject) => ({
         title: subject.name,
         payload: `onboarding:subject:${subject.name}`,
       })),
     );
+    if (subjects.length > 9) {
+      await this.zalo.sendText(
+        zaloUserId,
+        preferredLanguage === 'en'
+          ? 'Or type the subject name if not listed above.'
+          : 'Hoặc nhắn tên môn học nếu không thấy trong danh sách.',
+      );
+    }
   }
 
   private async askMode(
