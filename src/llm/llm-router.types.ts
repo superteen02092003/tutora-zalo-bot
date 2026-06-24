@@ -1,6 +1,7 @@
-import type { OnboardingStep } from '../bot/state/conversation-context.interface';
-
-export type SlotName = Exclude<OnboardingStep, 'done'>;
+// SlotName: only the slots that the LLM router can fill via free-text.
+// 'subject', 'grade_group', 'grade', 'mode', 'area' are button-only — NOT fillable by LLM.
+// 'freetext' is the only onboarding slot the LLM touches (semantic description step).
+export type SlotName = 'freetext';
 
 export type SlotMap = Partial<Record<SlotName, string>>;
 

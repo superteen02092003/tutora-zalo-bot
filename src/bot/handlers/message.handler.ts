@@ -3,12 +3,14 @@ import { ConfigService } from '@nestjs/config';
 import { TutorCandidateDto } from '../../be-client/dto';
 import { LlmRouterService } from '../../llm/llm-router.service';
 import { RouterDecision } from '../../llm/llm-router.types';
+import { AgentHandler } from './agent.handler';
 import { ZaloWebhookEvent } from '../../webhook/zalo-event.dto';
 import { getMessageText, getZaloUserId } from '../../webhook/zalo-event.utils';
 import { ZaloService } from '../../zalo/zalo.service';
 import { AgentMatchingFlow } from '../flows/agent-matching.flow';
 import { OnboardingFlow } from '../flows/onboarding.flow';
-import { ChatMessage, ConversationContext } from '../state/conversation-context.interface';
+import { ChatMessage, ConversationContext, OnboardingStep } from '../state/conversation-context.interface';
+import { ConversationState } from '../state/conversation-state.enum';
 import { ConversationStateService } from '../state/conversation-state.service';
 
 function detectLanguage(text: string): 'vi' | 'en' {
@@ -32,6 +34,7 @@ export class MessageHandler {
     private readonly llmRouter: LlmRouterService,
     private readonly onboardingFlow: OnboardingFlow,
     private readonly agentMatchingFlow: AgentMatchingFlow,
+    private readonly agentHandler: AgentHandler,
     config: ConfigService,
   ) {
     this.adminUserIds = new Set(config.get<string[]>('adminZaloUserIds') ?? []);
@@ -112,6 +115,69 @@ export class MessageHandler {
     }
 
     const convState = await this.state.getState(userId);
+
+    // ── Onboarding intercept ──────────────────────────────────────────────
+    if (convState === ConversationState.Onboarding && context.onboardingStep) {
+      const step = context.onboardingStep as OnboardingStep;
+
+      if (step === 'freetext') {
+        // Accept any free text (or "bỏ qua") during the freetext step
+        await this.onboardingFlow.applySlot(userId, 'freetext', text);
+        return;
+      }
+
+      if (step === 'area' && context.criteria?.teachingMode !== 'online') {
+        // 'area' step: if current area value is 'other' and we're waiting for city name
+        // Check context: if area not yet set (or set to 'other') accept this free text as city
+        const areaAlreadySet =
+          context.criteria?.locationDistrict &&
+          context.criteria.locationDistrict !== 'other';
+
+        if (!areaAlreadySet) {
+          // We are waiting for a freetext city name (user clicked "Tỉnh khác")
+          await this.onboardingFlow.applySlot(userId, 'area', text);
+          return;
+        }
+      }
+
+      if (this.onboardingFlow.isButtonOnlyStep(step)) {
+        // User sent free text during a button-only step — handle gracefully
+        await this.onboardingFlow.handleInvalidInput(userId);
+        return;
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────
+
+    // Booking/lịch đã chốt -> giữ luồng guided cũ (deterministic, ổn định, dính tiền).
+    // Còn lại (khám phá, matching, hỏi mở) -> AGENT hội thoại.
+    const inBookingFlow =
+      convState === ConversationState.BookingConfirm ||
+      convState === ConversationState.Booked ||
+      convState === ConversationState.Active ||
+      !!context.bookingStep ||
+      !!context.activeFlow;
+
+    if (!inBookingFlow) {
+      const outcome = await this.agentHandler.handle(userId, text, context);
+      if (outcome === 'booking') {
+        // Agent xác nhận ý định đặt lịch -> chuyển sang booking guided với gia sư đã chọn.
+        const shown = context.agentShownTutors ?? [];
+        const tutorId = shown.length === 1 ? shown[0].tutor_id : context.selectedTutorId;
+        const tutor = candidates.find((c) => c.tutorId === tutorId);
+        if (tutor) {
+          await this.handleTutorSelected(userId, tutor, context);
+        } else {
+          await this.zalo.sendText(
+            userId,
+            context.preferredLanguage === 'en'
+              ? 'Which tutor would you like to book? Please pick one from the list.'
+              : 'Bạn muốn đặt lịch với gia sư nào ạ? Bạn chọn giúp mình từ danh sách nhé.',
+          );
+        }
+      }
+      return;
+    }
+
     const decision = await this.llmRouter.decide({ message: text, state: convState, context, candidates });
     this.logger.debug(`LLM decision | user=${userId} | ${JSON.stringify(decision)}`);
 

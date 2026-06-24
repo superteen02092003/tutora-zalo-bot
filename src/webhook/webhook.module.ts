@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AgentModule } from '../agent/agent.module';
 import { BeClientModule } from '../be-client/be-client.module';
+import { AgentHandler } from '../bot/handlers/agent.handler';
 import { BeEventHandler } from '../bot/handlers/be-event.handler';
 import { FollowHandler } from '../bot/handlers/follow.handler';
 import { MessageHandler } from '../bot/handlers/message.handler';
@@ -24,6 +25,7 @@ import { WebhookService } from './webhook.service';
     WebhookService,
     FollowHandler,
     MessageHandler,
+    AgentHandler,
     PostbackHandler,
     BeEventHandler,
     AgentMatchingFlow,
