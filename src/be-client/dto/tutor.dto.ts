@@ -12,6 +12,8 @@ export interface TutorCandidateDto {
   grades?: string[];
   hourlyRate: number;
   trialLessonPrice?: number;
+  price_min?: number;
+  price_max?: number;
   averageRating: number;
   totalReviews: number;
   completedHours: number;

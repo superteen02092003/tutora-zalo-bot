@@ -25,25 +25,42 @@ export class MatchingFlow {
     );
   }
 
-  async showMatches(zaloUserId: string): Promise<void> {
+  /**
+   * Show tutor matches to the user.
+   *
+   * @param zaloUserId       Zalo user to send results to.
+   * @param rankedCandidates Pre-ranked candidates from the onboarding flow (AI-reordered).
+   *                         If omitted, falls back to fetching directly from .NET BE.
+   */
+  async showMatches(zaloUserId: string, rankedCandidates?: TutorCandidateDto[]): Promise<void> {
     const context = await this.state.getContext(zaloUserId);
-
-    if (!context.criteria) {
-      const lang = context.preferredLanguage ?? 'vi';
-      await this.zalo.sendText(
-        zaloUserId,
-        lang === 'en' ? 'I need a bit more information to find tutors.' : 'Mình cần thêm thông tin để tìm gia sư.',
-      );
-      return;
-    }
-
-    const result = await this.beClient.getMatchedTutors(context.criteria);
-    await this.state.updateContext(zaloUserId, { subjectId: result.subjectId });
-    await this.state.setMatchingCandidates(zaloUserId, result.candidates);
-
     const lang = context.preferredLanguage ?? 'vi';
 
-    if (result.candidates.length === 0) {
+    let candidates: TutorCandidateDto[];
+
+    if (rankedCandidates !== undefined) {
+      // Use the pre-ranked candidates provided by onboardingFlow.triggerMatching()
+      candidates = rankedCandidates;
+
+      // Persist to Redis so downstream flows (select_tutor, etc.) can look them up
+      await this.state.setMatchingCandidates(zaloUserId, candidates);
+    } else {
+      // Fallback: fetch directly from .NET BE (direct call without AI re-ranking)
+      if (!context.criteria) {
+        await this.zalo.sendText(
+          zaloUserId,
+          lang === 'en' ? 'I need a bit more information to find tutors.' : 'Mình cần thêm thông tin để tìm gia sư.',
+        );
+        return;
+      }
+
+      const result = await this.beClient.getMatchedTutors(context.criteria);
+      await this.state.updateContext(zaloUserId, { subjectId: result.subjectId });
+      await this.state.setMatchingCandidates(zaloUserId, result.candidates);
+      candidates = result.candidates;
+    }
+
+    if (candidates.length === 0) {
       await this.zalo.sendText(
         zaloUserId,
         lang === 'en'
@@ -54,14 +71,14 @@ export class MatchingFlow {
     }
 
     // Pick the best-rated tutor from each tier
-    const displayed = this.pickOnePer(result.candidates);
+    const displayed = this.pickOnePer(candidates);
 
     try {
       await this.zalo.sendText(
         zaloUserId,
         lang === 'en'
-          ? `Tutora found ${result.candidates.length} matching tutor(s)! Here are ${displayed.length} recommendations across different price ranges:`
-          : `Tutora tìm thấy ${result.candidates.length} gia sư phù hợp! Đây là ${displayed.length} gợi ý ở các mức học phí khác nhau:`,
+          ? `Tutora found ${candidates.length} matching tutor(s)! Here are ${displayed.length} recommendations across different price ranges:`
+          : `Tutora tìm thấy ${candidates.length} gia sư phù hợp! Đây là ${displayed.length} gợi ý ở các mức học phí khác nhau:`,
       );
 
       for (const candidate of displayed) {

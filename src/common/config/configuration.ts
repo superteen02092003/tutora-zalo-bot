@@ -13,6 +13,10 @@ export default () => ({
     apiKey: process.env.BE_INTERNAL_API_KEY,
     eventSecret: process.env.BE_EVENT_SECRET,
   },
+  aiService: {
+    url: process.env.AI_SERVICE_URL,
+    key: process.env.AI_SERVICE_KEY,
+  },
   redis: {
     url: process.env.REDIS_URL,
   },
