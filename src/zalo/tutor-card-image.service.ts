@@ -215,7 +215,12 @@ export class TutorCardImageService implements OnModuleInit {
     ctx.fill();
 
     const priceCY = pbY + pbH / 2;
-    const rate = tutor.hourlyRate ?? tutor.price_min ?? 0;
+    // .NET recommend trả 'pricePerHour'; guided cũ dùng 'hourlyRate'. Fallback đủ cả.
+    const rate =
+      (tutor as { pricePerHour?: number }).pricePerHour ??
+      tutor.hourlyRate ??
+      tutor.price_min ??
+      0;
     const priceNum = rate.toLocaleString('vi-VN');
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
