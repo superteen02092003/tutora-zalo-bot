@@ -7,7 +7,7 @@ import { ConversationContext } from '../state/conversation-context.interface';
 import { ConversationStateService } from '../state/conversation-state.service';
 
 const MAX_HISTORY = 10;        // giữ ~10 lượt gần nhất, tránh phình Redis + tốn token
-const MAX_CARDS = 3;           // số card gia sư hiển thị mỗi lượt
+const MAX_CARDS = 2;           // Zalo màn hình hẹp -> tối đa 2 card, tránh ngợp + chậm
 
 /**
  * Xử lý hội thoại tự do qua agent tutora-ai (tìm gia sư / hỏi chi tiết / lịch / confirm).
@@ -72,7 +72,9 @@ export class AgentHandler {
     }
     for (const tutor of tutors.slice(0, MAX_CARDS)) {
       try {
-        await this.zalo.sendTutorCard(userId, tutor, this.tutorProfileBaseUrl, lang);
+        await this.zalo.sendTutorCard(
+          userId, tutor, this.tutorProfileBaseUrl, lang, `agent_book:${tutor.tutorId}`,
+        );
       } catch (e) {
         this.logger.warn(`sendTutorCard failed for ${tutor.tutorId}: ${String(e)}`);
       }

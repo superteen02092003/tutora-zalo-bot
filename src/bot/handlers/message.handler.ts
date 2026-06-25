@@ -97,9 +97,12 @@ export class MessageHandler {
       await this.onboardingFlow.handlePostbackInput(userId, text);
       return;
     }
-    if (text.startsWith('select_tutor:')) {
-      const tutorId = text.slice('select_tutor:'.length);
+    // Nút "Đặt lịch" trên card AGENT -> chọn gia sư rồi vào booking guided.
+    // Dùng chung handler với select_tutor; tách prefix để biết nguồn từ agent.
+    if (text.startsWith('agent_book:') || text.startsWith('select_tutor:')) {
+      const tutorId = text.includes(':') ? text.slice(text.indexOf(':') + 1) : text;
       const updatedCtx = await this.state.getContext(userId);
+      // Tìm trong matching candidates; fallback nếu lệch — tra cứu lại để tránh chọn sai người.
       const tutor = candidates.find((c) => c.tutorId === tutorId);
       if (tutor) {
         await this.handleTutorSelected(userId, tutor, updatedCtx);

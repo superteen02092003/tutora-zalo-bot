@@ -289,6 +289,9 @@ export class ZaloService {
     tutor: TutorCandidateDto,
     profileBaseUrl: string,
     language: 'vi' | 'en' = 'vi',
+    // Payload nút "Đặt lịch". Mặc định select_tutor (guided cũ);
+    // agent truyền 'agent_book:<id>' để nút quay về AgentHandler, không rớt sang guided.
+    bookPayload?: string,
   ): Promise<void> {
     const cacheKey = `tutor_card_attachment:${tutor.tutorId}:${language}`;
     let attachmentId = await this.redis.getClient().get(cacheKey);
@@ -320,7 +323,7 @@ export class ZaloService {
             {
               title: language === 'en' ? 'Book session' : 'Đặt lịch',
               type: 'oa.query.hide',
-              payload: `select_tutor:${tutor.tutorId}`,
+              payload: bookPayload ?? `select_tutor:${tutor.tutorId}`,
             },
           ],
         },
