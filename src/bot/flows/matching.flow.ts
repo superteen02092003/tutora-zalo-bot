@@ -98,16 +98,12 @@ export class MatchingFlow {
   }
 
   // Returns at most 3 candidates — one per tier, in Standard→Pro→Premium order.
-  // Falls back to top 3 by rating if none match a tier.
   private pickOnePer(candidates: TutorCandidateDto[]): TutorCandidateDto[] {
     const picked = TIER_ORDER
-      .map((tier) => {
-        const inTier = candidates.filter((c) => c.subscriptionType === tier);
-        return inTier.sort((a, b) => b.averageRating - a.averageRating)[0];
-      })
+      .map((tier) => candidates.find((c) => c.subscriptionType === tier))
       .filter((c): c is TutorCandidateDto => !!c);
 
     if (picked.length > 0) return picked;
-    return [...candidates].sort((a, b) => b.averageRating - a.averageRating).slice(0, 3);
+    return candidates.slice(0, 3);
   }
 }

@@ -13,6 +13,7 @@ export interface ConversationContext {
   selectedTutorId?: string;
   selectedTutorName?: string;
   subjectId?: number;
+  gradeLevelId?: number;
   criteria?: MatchCriteria;
   selectedPackageSessionCount?: number;
   requiredSessionsPerWeek?: number;

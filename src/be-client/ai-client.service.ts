@@ -45,6 +45,11 @@ export interface AgentRequest {
   shown_tutors?: AgentShownTutor[];
 }
 
+export interface AgentContextPatch {
+  subject_id?: number | null;
+  grade_level_id?: number | null;
+}
+
 export interface AgentResponse {
   reply: string;
   tutors: Record<string, unknown>[]; // nguyên shape .NET recommend -> render card
@@ -52,6 +57,8 @@ export interface AgentResponse {
   awaiting_confirmation: boolean;
   confirm_type: 'context_change' | 'booking' | null;
   suggestions: string[];
+  // Môn/lớp mới sau khi đổi giữa chat -> lưu vào context để turn sau gửi đúng subject_id.
+  context_patch?: AgentContextPatch | null;
 }
 
 @Injectable()
