@@ -41,6 +41,7 @@ export class AgentHandler {
       channel: 'zalo',
       context: {
         subject_id: context.subjectId,
+        grade_level_id: context.gradeLevelId,
         teaching_mode: context.criteria?.teachingMode,
         city: context.criteria?.locationDistrict,
       },
@@ -100,10 +101,22 @@ export class AgentHandler {
       ? tutors.slice(0, MAX_CARDS).map((t) => ({ tutor_id: t.tutorId, name: t.fullName }))
       : context.agentShownTutors; // giữ list cũ nếu lượt này không search
 
+    // Đổi môn/lớp giữa chat: agent trả context_patch -> lưu để turn sau gửi đúng
+    // subject_id/grade_level_id, tránh kẹt môn cũ. Grade BẮT BUỘC phải lưu: agent
+    // gate search khi thiếu lớp — không lưu là turn sau agent hỏi lớp lặp lại.
+    const patchedSubjectId =
+      res.context_patch?.subject_id != null ? res.context_patch.subject_id : context.subjectId;
+    const patchedGradeLevelId =
+      res.context_patch?.grade_level_id != null
+        ? res.context_patch.grade_level_id
+        : context.gradeLevelId;
+
     await this.state.updateContext(userId, {
       agentHistory: history,
       agentShownTutors: shownTutors,
       agentAwaitingConfirm: res.awaiting_confirmation ? res.confirm_type ?? undefined : undefined,
+      subjectId: patchedSubjectId,
+      gradeLevelId: patchedGradeLevelId,
     });
 
     // 5. Bàn giao booking — caller (message.handler) sẽ chuyển booking flow.
