@@ -22,6 +22,9 @@ describe('MessageHandler', () => {
       key === 'aiMatching.enabled' ? false : key === 'adminZaloUserIds' ? [] : defaultValue,
     ),
   } as unknown as ConfigService;
+  const agentHandler = { handle: jest.fn() };
+  const ai = { summarizeSession: jest.fn() };
+  const config = { get: jest.fn().mockReturnValue([]) } as unknown as ConfigService;
 
   let handler: MessageHandler;
 
@@ -36,6 +39,8 @@ describe('MessageHandler', () => {
       llmRouter as never,
       onboardingFlow as never,
       agentMatchingFlow as never,
+      agentHandler as never,
+      ai as never,
       config,
     );
   });

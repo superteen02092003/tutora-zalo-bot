@@ -4,6 +4,7 @@ import { TutorCandidateDto } from '../../be-client/dto';
 import { LlmRouterService } from '../../llm/llm-router.service';
 import { RouterDecision } from '../../llm/llm-router.types';
 import { AgentHandler } from './agent.handler';
+import { AiClientService } from '../../be-client/ai-client.service';
 import { ZaloWebhookEvent } from '../../webhook/zalo-event.dto';
 import { getMessageText, getZaloUserId } from '../../webhook/zalo-event.utils';
 import { ZaloService } from '../../zalo/zalo.service';
@@ -12,6 +13,8 @@ import { OnboardingFlow } from '../flows/onboarding.flow';
 import { ChatMessage, ConversationContext, OnboardingStep } from '../state/conversation-context.interface';
 import { ConversationState } from '../state/conversation-state.enum';
 import { ConversationStateService } from '../state/conversation-state.service';
+
+const SESSION_GAP_SECONDS = 3 * 60 * 60;
 
 function detectLanguage(text: string): 'vi' | 'en' {
   return /[àáâãèéêìíòóôõùúăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ]/i.test(text)
@@ -35,6 +38,7 @@ export class MessageHandler {
     private readonly onboardingFlow: OnboardingFlow,
     private readonly agentMatchingFlow: AgentMatchingFlow,
     private readonly agentHandler: AgentHandler,
+    private readonly ai: AiClientService,
     config: ConfigService,
   ) {
     this.adminUserIds = new Set(config.get<string[]>('adminZaloUserIds') ?? []);
@@ -161,6 +165,14 @@ export class MessageHandler {
       !!context.activeFlow;
 
     if (!inBookingFlow) {
+      if (context.awaitingWelcomeBack) {
+        const handledWb = await this.handleWelcomeBackReply(userId, text, context);
+        if (handledWb) return;
+      } else if (await this.shouldWelcomeBack(userId, context)) {
+        await this.startWelcomeBack(userId, text, context);
+        return;
+      }
+
       const outcome = await this.agentHandler.handle(userId, text, context);
       if (outcome === 'booking') {
         // Agent xác nhận ý định đặt lịch -> chuyển sang booking guided với gia sư đã chọn.
@@ -336,10 +348,126 @@ export class MessageHandler {
   private inBookingPhase(context: ConversationContext): boolean {
     return Boolean(
       context.bookingStep ||
-        context.activeFlow ||
-        context.activeBookingId ||
-        context.selectedTutorId,
+      context.activeFlow ||
+      context.activeBookingId ||
+      context.selectedTutorId,
     );
+  }
+
+  // Session memory / welcome-back
+
+  private async shouldWelcomeBack(
+    userId: string,
+    context: ConversationContext,
+  ): Promise<boolean> {
+    const history = context.agentHistory ?? [];
+    if (history.length < 2) return false; // chưa có phiên cũ đáng kể
+    const last = await this.state.getLastActivity(userId);
+    if (!last) return false;
+    const gapSeconds = (Date.now() - last.getTime()) / 1000;
+    return gapSeconds > SESSION_GAP_SECONDS;
+  }
+
+  private async startWelcomeBack(
+    userId: string,
+    text: string,
+    context: ConversationContext,
+  ): Promise<void> {
+    const lang = context.preferredLanguage ?? 'vi';
+    const summary = await this.ai.summarizeSession(
+      context.agentHistory ?? [],
+      context.agentShownTutors ?? [],
+    );
+
+    if (!summary || !summary.has_pending_search || !summary.recap) {
+      await this.state.updateContext(userId, {
+        agentHistory: [],
+        agentShownTutors: [],
+        awaitingWelcomeBack: false,
+        sessionMemory: undefined,
+      });
+      // Xử lý luôn tin nhắn hiện tại như phiên mới (không bắt user gõ lại).
+      await this.agentHandler.handle(userId, text, {
+        ...context,
+        agentHistory: [],
+        agentShownTutors: [],
+      });
+      return;
+    }
+
+    // Có việc dở -> lưu facts, hỏi tiếp tục/tìm mới bằng 2 nút, CHỜ user chọn.
+    const m = summary.memory;
+    await this.state.updateContext(userId, {
+      awaitingWelcomeBack: true,
+      agentHistory: [],
+      sessionMemory: {
+        subject: m.subject,
+        grade: m.grade,
+        goal: m.goal,
+        budgetMax: m.budget_max,
+        preferences: m.preferences,
+        tutorsShown: m.tutors_shown,
+      },
+    });
+
+    await this.zalo.sendText(
+      userId,
+      lang === 'en'
+        ? `Welcome back! ${summary.recap}`
+        : `Dạ chào anh/chị quay lại ạ! ${summary.recap}`,
+    );
+    await this.zalo.sendNumberedList(
+      userId,
+      lang === 'en' ? 'Would you like to:' : 'Anh/chị muốn:',
+      lang === 'en'
+        ? [{ label: 'Continue' }, { label: 'Start over' }]
+        : [{ label: 'Tiếp tục tìm như cũ' }, { label: 'Tìm mới' }],
+    );
+  }
+
+  private async handleWelcomeBackReply(
+    userId: string,
+    text: string,
+    context: ConversationContext,
+  ): Promise<boolean> {
+    const t = text.toLowerCase().trim();
+    const wantsContinue = /ti[eế]p t[uụ]c|như c[uũ]|continue|^1$|^1\.|đúng|ok|có/i.test(t)
+      && !/t[iì]m m[oớ]i|mới|start over|^2$/i.test(t);
+
+    const mem = context.sessionMemory;
+    await this.state.updateContext(userId, { awaitingWelcomeBack: false });
+
+    if (wantsContinue && mem) {
+      // Pre-fill nhu cầu cũ thành 1 message tổng hợp -> agent hiểu ngữ cảnh, tìm luôn.
+      const parts: string[] = [];
+      if (mem.subject) parts.push(`môn ${mem.subject}`);
+      if (mem.grade) parts.push(`lớp ${mem.grade}`);
+      if (mem.goal) parts.push(mem.goal);
+      if (mem.preferences) parts.push(mem.preferences);
+      if (mem.budgetMax) parts.push(`giá dưới ${Math.round(mem.budgetMax / 1000)}k`);
+      const synthesized = `Tìm gia sư ${parts.join(', ')}`;
+      await this.agentHandler.handle(userId, synthesized, {
+        ...context,
+        awaitingWelcomeBack: false,
+        agentHistory: [],
+      });
+      return true;
+    }
+
+    // Tìm mới -> quên phiên cũ hẳn, xử lý tin nhắn hiện tại như phiên mới.
+    await this.state.updateContext(userId, {
+      sessionMemory: undefined,
+      agentHistory: [],
+      agentShownTutors: [],
+    });
+    await this.agentHandler.handle(userId, text, {
+      ...context,
+      awaitingWelcomeBack: false,
+      agentHistory: [],
+      agentShownTutors: [],
+      sessionMemory: undefined,
+    });
+    return true;
   }
 
   private async handleAdminCommand(adminId: string, text: string): Promise<boolean> {
