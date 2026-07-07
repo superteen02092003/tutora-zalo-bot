@@ -61,6 +61,21 @@ export interface AgentResponse {
   context_patch?: AgentContextPatch | null;
 }
 
+export interface SessionMemory {
+  subject?: string | null;
+  grade?: number | null;
+  goal?: string | null;
+  budget_max?: number | null;
+  preferences?: string | null;
+  tutors_shown: string[];
+}
+
+export interface SummarizeSessionResponse {
+  recap: string;
+  memory: SessionMemory;
+  has_pending_search: boolean;
+}
+
 @Injectable()
 export class AiClientService {
   private readonly logger = new Logger(AiClientService.name);
@@ -158,6 +173,32 @@ export class AiClientService {
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
       this.logger.warn(`AiClientService.askAgent failed: ${msg}`);
+      return null;
+    }
+  }
+
+  /**
+   * Tóm tắt phiên chat cũ khi user quay lại sau gap dài -> structured facts + recap.
+   * Gọi 1 lần khi phát hiện user quay lại. null nếu lỗi (caller fallback chào mới).
+   */
+  async summarizeSession(
+    history: AgentHistoryMessage[],
+    shownTutors: AgentShownTutor[] = [],
+  ): Promise<SummarizeSessionResponse | null> {
+    if (!this.baseUrl || !this.apiKey) return null;
+    try {
+      const url = `${this.baseUrl.replace(/\/$/, '')}/api/v1/summarize-session`;
+      const response = await lastValueFrom(
+        this.http.post<SummarizeSessionResponse>(
+          url,
+          { history, shown_tutors: shownTutors },
+          { headers: { 'X-API-Key': this.apiKey }, timeout: 15_000 },
+        ),
+      );
+      return response.data;
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`AiClientService.summarizeSession failed: ${msg}`);
       return null;
     }
   }

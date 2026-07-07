@@ -47,6 +47,16 @@ export interface ConversationContext {
   agentShownTutors?: { tutor_id: string; name?: string }[];
   // Agent vừa hỏi xác nhận (đổi ngữ cảnh / booking) -> lượt sau là câu trả lời confirm.
   agentAwaitingConfirm?: 'context_change' | 'booking';
+  // Session memory: khi user quay lại sau gap dài, bot tóm tắt phiên cũ + hỏi tiếp tục/tìm mới.
+  sessionMemory?: {
+    subject?: string | null;
+    grade?: number | null;
+    goal?: string | null;
+    budgetMax?: number | null;
+    preferences?: string | null;
+    tutorsShown?: string[];
+  };
+  awaitingWelcomeBack?: boolean;
   findTutorStep?: 'awaiting_subject' | 'awaiting_grade' | 'awaiting_gender' | 'awaiting_criteria' | 'awaiting_confirm';
   subject?: string;
   grade?: string;

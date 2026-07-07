@@ -181,6 +181,11 @@ export class ConversationStateService {
     return result === 'OK';
   }
 
+  async getLastActivity(zaloUserId: string): Promise<Date | null> {
+    const record = await this.getRecord(zaloUserId);
+    return record?.updatedAt ? new Date(record.updatedAt) : null;
+  }
+
   private async getRecord(
     zaloUserId: string,
   ): Promise<ConversationRecord | null> {
