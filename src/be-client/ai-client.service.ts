@@ -30,6 +30,10 @@ export interface AgentContext {
   grade_level_id?: number;
   teaching_mode?: string;
   city?: string;
+  // Slot hội thoại (agent slot-filling): mục tiêu học + mong muốn về gia sư. Persist
+  // giống subject/grade để agent không hỏi lại điều đã biết qua các lượt.
+  goal?: string;
+  preferences?: string;
 }
 
 export interface AgentShownTutor {
@@ -48,6 +52,8 @@ export interface AgentRequest {
 export interface AgentContextPatch {
   subject_id?: number | null;
   grade_level_id?: number | null;
+  goal?: string | null;
+  preferences?: string | null;
 }
 
 export interface AgentResponse {
