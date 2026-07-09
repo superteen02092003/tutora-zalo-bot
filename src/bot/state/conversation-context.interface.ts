@@ -47,6 +47,9 @@ export interface ConversationContext {
   agentShownTutors?: { tutor_id: string; name?: string }[];
   // Agent vừa hỏi xác nhận (đổi ngữ cảnh / booking) -> lượt sau là câu trả lời confirm.
   agentAwaitingConfirm?: 'context_change' | 'booking';
+  // Slot hội thoại agent (mục tiêu học + mong muốn gia sư) -> persist để không hỏi lại.
+  agentGoal?: string;
+  agentPreferences?: string;
   // Session memory: khi user quay lại sau gap dài, bot tóm tắt phiên cũ + hỏi tiếp tục/tìm mới.
   sessionMemory?: {
     subject?: string | null;

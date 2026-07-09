@@ -44,6 +44,8 @@ export class AgentHandler {
         grade_level_id: context.gradeLevelId,
         teaching_mode: context.criteria?.teachingMode,
         city: context.criteria?.locationDistrict,
+        goal: context.agentGoal,
+        preferences: context.agentPreferences,
       },
       history: context.agentHistory ?? [],
       shown_tutors: context.agentShownTutors ?? [],
@@ -110,6 +112,13 @@ export class AgentHandler {
       res.context_patch?.grade_level_id != null
         ? res.context_patch.grade_level_id
         : context.gradeLevelId;
+    // Slot goal/preferences: lưu khi agent rút được, ngược lại giữ giá trị cũ.
+    const patchedGoal =
+      res.context_patch?.goal != null ? res.context_patch.goal : context.agentGoal;
+    const patchedPreferences =
+      res.context_patch?.preferences != null
+        ? res.context_patch.preferences
+        : context.agentPreferences;
 
     await this.state.updateContext(userId, {
       agentHistory: history,
@@ -117,6 +126,8 @@ export class AgentHandler {
       agentAwaitingConfirm: res.awaiting_confirmation ? res.confirm_type ?? undefined : undefined,
       subjectId: patchedSubjectId,
       gradeLevelId: patchedGradeLevelId,
+      agentGoal: patchedGoal,
+      agentPreferences: patchedPreferences,
     });
 
     // 5. Bàn giao booking — caller (message.handler) sẽ chuyển booking flow.
