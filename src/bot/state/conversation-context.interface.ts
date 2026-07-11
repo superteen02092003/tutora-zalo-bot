@@ -1,7 +1,13 @@
 import { MatchCriteria, TutorAvailabilitySlot } from '../../be-client/dto';
 
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 export interface ConversationContext {
   zaloUserId: string;
+  chatHistory?: ChatMessage[];
   preferredLanguage?: 'vi' | 'en';
   parentId?: string;
   selectedTutorId?: string;
@@ -38,6 +44,13 @@ export interface ConversationContext {
   grade?: string;
   tutorGender?: 'male' | 'female' | 'any';
   personalCriteria?: string;
+  // ── AI matching qua FastAPI agent (tutora-ai) ──
+  // agentCtx: slot hội thoại agent trả về qua context_patch — merge GENERIC (mọi key
+  // non-null đè vào), bot không diễn giải từng field → Python thêm slot mới không phải sửa bot.
+  // Key đã biết: subject_id, grade_level_id, goal, preferences, asked_preferences.
+  agentCtx?: Record<string, unknown>;
+  // Gia sư agent đã gợi ý (để agent hiểu "chi tiết cô A" các lượt sau).
+  agentShownTutors?: { tutor_id: string; name?: string }[];
 }
 
 export type OnboardingStep =

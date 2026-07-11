@@ -2,8 +2,11 @@ import type { OnboardingStep } from '../bot/state/conversation-context.interface
 
 export type SlotName = Exclude<OnboardingStep, 'done'>;
 
+export type SlotMap = Partial<Record<SlotName, string>>;
+
 export type RouterDecision =
   | { action: 'fill_slot'; slot: SlotName; value: string }
+  | { action: 'bulk_fill_slots'; slots: SlotMap }
   | { action: 'start_onboarding' }
   | { action: 'select_tutor'; tutorName: string }
   | { action: 'select_package'; sessionCount: 4 | 8 | 12 }

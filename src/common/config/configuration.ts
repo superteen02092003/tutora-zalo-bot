@@ -21,6 +21,16 @@ export default () => ({
     baseUrl: process.env.DEEPSEEK_BASE_URL,
     model: process.env.DEEPSEEK_MODEL,
   },
+  // FastAPI AI agent (tutora-ai) — bộ não hội thoại AI matching.
+  agent: {
+    baseUrl: process.env.AGENT_BASE_URL ?? 'http://localhost:8000',
+    apiKey: process.env.AGENT_API_KEY,
+  },
+  // Bật = mọi tin nhắn giai đoạn matching route qua AI agent (thay llm-router + onboarding
+  // nút bấm). Tắt = bot chạy y nguyên trạng cũ.
+  aiMatching: {
+    enabled: process.env.AI_MATCHING_ENABLED === 'true',
+  },
   zbs: {
     paymentTemplateId: process.env.ZBS_PAYMENT_TEMPLATE_ID,
   },

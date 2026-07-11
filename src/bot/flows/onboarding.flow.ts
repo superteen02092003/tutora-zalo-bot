@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { BeClientService } from '../../be-client/be-client.service';
 import { MatchCriteria } from '../../be-client/dto';
-import { SlotName } from '../../llm/llm-router.types';
+import { SlotMap, SlotName } from '../../llm/llm-router.types';
 import { ZaloService } from '../../zalo/zalo.service';
 import { ConversationContext } from '../state/conversation-context.interface';
 import { ConversationState } from '../state/conversation-state.enum';
@@ -71,6 +71,105 @@ export class OnboardingFlow {
     await this.applySlot(zaloUserId, slot, value);
   }
 
+  async applyBulkSlots(zaloUserId: string, slots: SlotMap): Promise<void> {
+    const user =
+      (await this.beClient.getUserByZaloId(zaloUserId)) ??
+      (await this.beClient.upsertZaloLead(zaloUserId));
+
+    const existingCtx = await this.state.getContext(zaloUserId);
+    const preferredLanguage: BotLanguage = (slots['language'] as BotLanguage) ?? existingCtx.preferredLanguage ?? 'vi';
+
+    // Build criteria directly from slots without triggering intermediate questions
+    const criteria: MatchCriteria = {
+      subject: '',
+      grade: '',
+      teachingMode: 'both',
+      ...existingCtx.criteria,
+    };
+    if (slots.subject) criteria.subject = slots.subject;
+    if (slots.grade) criteria.grade = slots.grade;
+    if (slots.mode) criteria.teachingMode = slots.mode as MatchCriteria['teachingMode'];
+    else if (!existingCtx.criteria?.teachingMode) delete (criteria as Partial<MatchCriteria>).teachingMode;
+    if (slots.area) criteria.locationDistrict = slots.area;
+    if (slots.purpose) criteria.purpose = slots.purpose as MatchCriteria['purpose'];
+
+    const hasMode = !!criteria.teachingMode;
+    const REQUIRED: SlotName[] = ['subject', 'grade', 'mode', 'purpose'];
+    const needsArea = hasMode && criteria.teachingMode !== 'online';
+    if (needsArea) REQUIRED.push('area');
+
+    const missingSlot = REQUIRED.find((s) => {
+      if (s === 'area') return !criteria.locationDistrict;
+      if (s === 'subject') return !criteria.subject;
+      if (s === 'grade') return !criteria.grade;
+      if (s === 'mode') return !hasMode;
+      if (s === 'purpose') return !criteria.purpose;
+      return false;
+    });
+
+    await this.state.setContext(zaloUserId, {
+      zaloUserId,
+      parentId: user.userId,
+      preferredLanguage,
+      chatHistory: existingCtx.chatHistory,
+      criteria,
+      onboardingStep: missingSlot ?? 'done',
+    });
+    await this.state.setState(zaloUserId, ConversationState.Onboarding);
+
+    if (!missingSlot) {
+      await this.matchingFlow.showMatches(zaloUserId);
+      return;
+    }
+
+    // Only ask for the first missing slot
+    const ctx = await this.state.getContext(zaloUserId);
+    switch (missingSlot) {
+      case 'subject': await this.askSubject(zaloUserId, preferredLanguage); break;
+      case 'grade':
+        await this.zalo.sendText(zaloUserId, this.text(ctx, {
+          vi: 'Học sinh đang học lớp mấy? Nhắn số lớp nhé (1-12).',
+          en: 'What grade is the student in? (1-12)',
+        }));
+        break;
+      case 'mode': {
+        const modeSummary = [
+          criteria.subject && `môn ${criteria.subject}`,
+          criteria.grade && criteria.grade.replace('Lop ', 'lớp '),
+          criteria.locationDistrict && `khu vực ${criteria.locationDistrict}`,
+          criteria.purpose && { exam_prep: 'ôn thi', regular: 'học thêm', foundation: 'lấy nền', advanced: 'nâng cao' }[criteria.purpose],
+        ].filter(Boolean).join(', ');
+        if (modeSummary) {
+          await this.zalo.sendText(zaloUserId, `Tutora đã ghi nhận: ${modeSummary}. Bạn muốn học theo hình thức nào?`);
+        }
+        await this.askMode(zaloUserId, ctx);
+        break;
+      }
+      case 'area':
+        await this.zalo.sendText(zaloUserId, this.text(ctx, {
+          vi: 'Bạn muốn học ở khu vực quận/huyện nào?',
+          en: 'Which district/area would you like to study in?',
+        }));
+        break;
+      case 'purpose': {
+        const summary = [
+          criteria.subject && `môn ${criteria.subject}`,
+          criteria.grade && criteria.grade.replace('Lop ', 'lớp '),
+          criteria.teachingMode === 'offline' ? 'tại nhà' : criteria.teachingMode === 'online' ? 'online' : criteria.teachingMode === 'both' ? 'linh hoạt' : null,
+          criteria.locationDistrict && `khu vực ${criteria.locationDistrict}`,
+        ].filter(Boolean).join(', ');
+        if (summary) {
+          await this.zalo.sendText(zaloUserId, this.text(ctx, {
+            vi: `Tutora đã ghi nhận: ${summary}. Cho mình biết thêm mục tiêu học của con nhé!`,
+            en: `Got it: ${summary}. What is the student's learning goal?`,
+          }));
+        }
+        await this.askPurpose(zaloUserId, ctx);
+        break;
+      }
+    }
+  }
+
   async applySlot(
     zaloUserId: string,
     slot: SlotName,
@@ -112,11 +211,18 @@ export class OnboardingFlow {
       case 'mode': {
         const teachingMode = value as 'online' | 'offline' | 'both';
         await this.updateCriteria(zaloUserId, context, { teachingMode });
+        const updatedCtx = await this.state.getContext(zaloUserId);
 
-        if (teachingMode === 'online') {
-          // Skip area question for online-only
-          await this.state.updateContext(zaloUserId, { onboardingStep: 'purpose' });
-          await this.askPurpose(zaloUserId, context);
+        if (teachingMode === 'online' || updatedCtx.criteria?.locationDistrict) {
+          // Skip area if online or already filled
+          if (updatedCtx.criteria?.purpose) {
+            // All slots filled — go to matching
+            await this.state.updateContext(zaloUserId, { onboardingStep: 'done' });
+            await this.matchingFlow.showMatches(zaloUserId);
+          } else {
+            await this.state.updateContext(zaloUserId, { onboardingStep: 'purpose' });
+            await this.askPurpose(zaloUserId, updatedCtx);
+          }
         } else {
           await this.state.updateContext(zaloUserId, { onboardingStep: 'area' });
           await this.zalo.sendText(
@@ -132,8 +238,14 @@ export class OnboardingFlow {
 
       case 'area': {
         await this.updateCriteria(zaloUserId, context, { locationDistrict: value });
-        await this.state.updateContext(zaloUserId, { onboardingStep: 'purpose' });
-        await this.askPurpose(zaloUserId, context);
+        const updatedCtx = await this.state.getContext(zaloUserId);
+        if (updatedCtx.criteria?.purpose) {
+          await this.state.updateContext(zaloUserId, { onboardingStep: 'done' });
+          await this.matchingFlow.showMatches(zaloUserId);
+        } else {
+          await this.state.updateContext(zaloUserId, { onboardingStep: 'purpose' });
+          await this.askPurpose(zaloUserId, updatedCtx);
+        }
         break;
       }
 

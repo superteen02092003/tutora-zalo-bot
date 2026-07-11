@@ -6,8 +6,9 @@ import { RouterDecision } from '../../llm/llm-router.types';
 import { ZaloWebhookEvent } from '../../webhook/zalo-event.dto';
 import { getMessageText, getZaloUserId } from '../../webhook/zalo-event.utils';
 import { ZaloService } from '../../zalo/zalo.service';
+import { AgentMatchingFlow } from '../flows/agent-matching.flow';
 import { OnboardingFlow } from '../flows/onboarding.flow';
-import { ConversationContext } from '../state/conversation-context.interface';
+import { ChatMessage, ConversationContext } from '../state/conversation-context.interface';
 import { ConversationStateService } from '../state/conversation-state.service';
 
 function detectLanguage(text: string): 'vi' | 'en' {
@@ -16,19 +17,25 @@ function detectLanguage(text: string): 'vi' | 'en' {
     : 'en';
 }
 
+// Direct triggers — bypass LLM hoàn toàn.
+const FIND_TUTOR_TRIGGERS = ['#timgiasu', 'onboarding:start', 'tìm gia sư', 'tìm giasư'];
+
 @Injectable()
 export class MessageHandler {
   private readonly logger = new Logger(MessageHandler.name);
   private readonly adminUserIds: Set<string>;
+  private readonly aiMatchingEnabled: boolean;
 
   constructor(
     private readonly state: ConversationStateService,
     private readonly zalo: ZaloService,
     private readonly llmRouter: LlmRouterService,
     private readonly onboardingFlow: OnboardingFlow,
+    private readonly agentMatchingFlow: AgentMatchingFlow,
     config: ConfigService,
   ) {
     this.adminUserIds = new Set(config.get<string[]>('adminZaloUserIds') ?? []);
+    this.aiMatchingEnabled = config.get<boolean>('aiMatching.enabled', false);
   }
 
   async handle(event: ZaloWebhookEvent): Promise<void> {
@@ -59,9 +66,25 @@ export class MessageHandler {
 
     const candidates = await this.state.getMatchingCandidates<TutorCandidateDto>(userId);
 
-    // Direct triggers — bypass LLM hoàn toàn.
-    const FIND_TUTOR_TRIGGERS = ['#timgiasu', 'onboarding:start', 'tìm gia sư', 'tìm giasư'];
-    if (FIND_TUTOR_TRIGGERS.includes(text.toLowerCase().trim())) {
+    // ── AI MATCHING (feature flag): hội thoại giai đoạn matching qua FastAPI agent ──
+    // Giữ nguyên đường cũ cho: postback onboarding:<slot> còn treo, nút select_tutor:
+    // (booking entry), và các sub-flow booking/sau-booking (agent Python không xử lý
+    // reschedule/cancel — xem tutora-ai/agents/agentscenarios.md mục 7).
+    const isFindTrigger = FIND_TUTOR_TRIGGERS.includes(text.toLowerCase().trim());
+    if (
+      this.aiMatchingEnabled &&
+      !text.startsWith('select_tutor:') &&
+      (!text.startsWith('onboarding:') || text === 'onboarding:start') &&
+      (isFindTrigger || !this.inBookingPhase(context))
+    ) {
+      // Trigger nút "tìm gia sư" → gửi vào agent như câu nói tự nhiên để agent mở màn
+      // slot-filling (thay vì onboarding nút bấm từng bước).
+      const message = isFindTrigger ? 'tìm gia sư' : text;
+      await this.agentMatchingFlow.handle(userId, message);
+      return;
+    }
+
+    if (isFindTrigger) {
       await this.onboardingFlow.start(userId);
       return;
     }
@@ -92,7 +115,12 @@ export class MessageHandler {
     const decision = await this.llmRouter.decide({ message: text, state: convState, context, candidates });
     this.logger.debug(`LLM decision | user=${userId} | ${JSON.stringify(decision)}`);
 
-    await this.executeDecision(userId, decision, context, candidates);
+    const freshContext = await this.state.getContext(userId);
+    await this.executeDecision(userId, decision, freshContext, candidates);
+
+    if ('reply' in decision && decision.reply) {
+      await this.appendChatHistory(userId, text, decision.reply);
+    }
   }
 
   private async executeDecision(
@@ -108,6 +136,10 @@ export class MessageHandler {
 
       case 'fill_slot':
         await this.onboardingFlow.applySlot(userId, decision.slot, decision.value);
+        break;
+
+      case 'bulk_fill_slots':
+        await this.onboardingFlow.applyBulkSlots(userId, decision.slots);
         break;
 
       case 'select_tutor': {
@@ -140,17 +172,18 @@ export class MessageHandler {
         );
         break;
 
-      case 'select_schedule':
-        await this.state.updateContext(userId, {
+      case 'select_schedule': {
+        const freshCtx = await this.state.updateContext(userId, {
           requiredSessionsPerWeek: decision.preset === 'twice_weekly' ? 2 : 3,
         });
         await this.zalo.sendText(
           userId,
-          context.preferredLanguage === 'en'
+          freshCtx.preferredLanguage === 'en'
             ? "Got it! Tutora's team will reach out to confirm your schedule and send payment details."
             : 'Tutora đã ghi nhận. Nhân viên Tutora sẽ liên hệ để xác nhận lịch và gửi thông tin thanh toán cho bạn sớm nhé!',
         );
         break;
+      }
 
       case 'check_status':
         await this.zalo.sendText(userId, this.buildStatusMessage(context));
@@ -218,6 +251,26 @@ export class MessageHandler {
     return en
       ? "You don't have any active lessons yet. Would you like to find a tutor?"
       : 'Hiện bạn chưa có lịch học nào. Bạn muốn tìm gia sư không?';
+  }
+
+  private async appendChatHistory(userId: string, userText: string, botReply: string): Promise<void> {
+    const context = await this.state.getContext(userId);
+    const history: ChatMessage[] = context.chatHistory ?? [];
+    history.push({ role: 'user', content: userText });
+    history.push({ role: 'assistant', content: botReply });
+    await this.state.updateContext(userId, { chatHistory: history.slice(-20) });
+  }
+
+  // Đang trong phễu booking / sau-booking → giữ đường llm-router + flows cũ, KHÔNG đưa
+  // vào agent matching (agent chỉ phụ trách giai đoạn tìm gia sư). selectedTutorId tính
+  // là trong phễu (đang chọn gói/lịch qua free-text) — thoát bằng trigger "tìm gia sư".
+  private inBookingPhase(context: ConversationContext): boolean {
+    return Boolean(
+      context.bookingStep ||
+        context.activeFlow ||
+        context.activeBookingId ||
+        context.selectedTutorId,
+    );
   }
 
   private async handleAdminCommand(adminId: string, text: string): Promise<boolean> {
