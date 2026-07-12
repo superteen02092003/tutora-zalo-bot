@@ -9,6 +9,7 @@ import { ConversationStateModule } from '../bot/state/conversation-state.module'
 import { AgentMatchingFlow } from '../bot/flows/agent-matching.flow';
 import { MatchingFlow } from '../bot/flows/matching.flow';
 import { OnboardingFlow } from '../bot/flows/onboarding.flow';
+import { RedisModule } from '../common/redis/redis.module';
 import { LlmModule } from '../llm/llm.module';
 import { ZaloModule } from '../zalo/zalo.module';
 import { BeEventsController } from './be-events.controller';
@@ -17,7 +18,7 @@ import { WebhookController } from './webhook.controller';
 import { WebhookService } from './webhook.service';
 
 @Module({
-  imports: [AgentModule, BeClientModule, ConversationStateModule, LlmModule, ZaloModule],
+  imports: [AgentModule, BeClientModule, ConversationStateModule, LlmModule, RedisModule, ZaloModule],
   controllers: [WebhookController, BeEventsController],
   providers: [
     WebhookService,

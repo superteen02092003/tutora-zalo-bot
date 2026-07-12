@@ -25,6 +25,9 @@ export default () => ({
   agent: {
     baseUrl: process.env.AGENT_BASE_URL ?? 'http://localhost:8000',
     apiKey: process.env.AGENT_API_KEY,
+    // true khi agent deploy Cloud Run KHÔNG --allow-unauthenticated — bot tự lấy
+    // Google identity token qua metadata server (chỉ hoạt động khi bot cũng chạy trên GCP).
+    useIamAuth: process.env.AGENT_USE_IAM_AUTH === 'true',
   },
   // Bật = mọi tin nhắn giai đoạn matching route qua AI agent (thay llm-router + onboarding
   // nút bấm). Tắt = bot chạy y nguyên trạng cũ.

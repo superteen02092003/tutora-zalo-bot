@@ -38,6 +38,7 @@ import { ZaloModule } from './zalo/zalo.module';
         PORT: Joi.number().port().default(3000),
         AGENT_BASE_URL: Joi.string().uri().default('http://localhost:8000'),
         AGENT_API_KEY: Joi.string().allow('').optional(),
+        AGENT_USE_IAM_AUTH: Joi.boolean().truthy('true').falsy('false').default(false),
         AI_MATCHING_ENABLED: Joi.boolean()
           .truthy('true')
           .falsy('false')

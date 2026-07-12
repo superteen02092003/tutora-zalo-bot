@@ -6,9 +6,16 @@ import { RedisService } from '../common/redis/redis.service';
 
 const ZALO_OAUTH_URL = 'https://oauth.zaloapp.com/v4/oa/access_token';
 const REDIS_KEY = 'zalo:oa:token';
-const REFRESH_BUFFER_MS = 60 * 60 * 1000; // refresh khi token còn dưới 1h
-const SEED_LIFETIME_MS = 23 * 60 * 60 * 1000; // token seed từ env coi như còn 23h
-const DEFAULT_LIFETIME_S = 90000; // ~25h, dùng khi Zalo không trả expires_in
+// Zalo OA access_token CHỈ sống 1h (không phải ~25h như code cũ giả định — đây là bug
+// gốc gây lỗi "-216 expired" liên tục: token seed từ env bị coi là còn hạn rất lâu trong
+// khi thực tế Zalo đã hết hạn từ lâu). Nguồn: developers.zalo.me (access token 1h,
+// refresh token single-use ~3 tháng).
+const ACCESS_TOKEN_LIFETIME_MS = 60 * 60 * 1000; // 1h — đúng thực tế Zalo OA
+const REFRESH_BUFFER_MS = 5 * 60 * 1000; // refresh khi còn dưới 5' (không thể >= lifetime)
+// Seed từ .env: KHÔNG biết token đã tồn tại bao lâu trước khi dán vào .env → coi như đã
+// hết hạn ngay, buộc refresh thật ở lần gọi đầu tiên thay vì tin token seed còn sống lâu.
+const SEED_LIFETIME_MS = 0;
+const DEFAULT_LIFETIME_S = ACCESS_TOKEN_LIFETIME_MS / 1000; // fallback khi Zalo không trả expires_in
 
 interface TokenState {
   accessToken: string;
@@ -43,7 +50,8 @@ export class ZaloTokenService implements OnModuleInit {
     await this.loadState();
     if (!this.canRefresh()) {
       this.logger.warn(
-        'Auto-refresh Zalo token CHƯA bật (thiếu ZALO_APP_ID / ZALO_APP_SECRET / refresh token). Token sẽ hết hạn sau ~25h.',
+        'Auto-refresh Zalo token CHƯA bật (thiếu ZALO_APP_ID / ZALO_APP_SECRET / refresh token). ' +
+        'Access token Zalo OA chỉ sống ~1h — không tự refresh sẽ hết hạn rất nhanh.',
       );
     }
   }
