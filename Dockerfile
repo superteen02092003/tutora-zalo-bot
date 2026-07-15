@@ -18,4 +18,4 @@ COPY package*.json ./
 RUN npm install --omit=dev
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/assets ./assets
-CMD ["node", "dist/src/main"]
+CMD ["node", "dist/main"]
