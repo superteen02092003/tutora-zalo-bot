@@ -8,6 +8,7 @@ describe('MessageHandler', () => {
     getContext: jest.fn(),
     getMatchingCandidates: jest.fn(),
     updateContext: jest.fn(),
+    getLastActivity: jest.fn(),
   };
   const zalo = {
     sendText: jest.fn(),
@@ -15,7 +16,12 @@ describe('MessageHandler', () => {
   };
   const llmRouter = { decide: jest.fn() };
   const onboardingFlow = { start: jest.fn(), applySlot: jest.fn() };
-  const agentMatchingFlow = { handle: jest.fn() };
+  const agentMatchingFlow = { handle: jest.fn(), runTurn: jest.fn() };
+  const miniAppSearchFlow = { sendSearchButton: jest.fn() };
+  // welcome-back (shouldWelcomeBack) đọc getLastActivity, nhưng short-circuit ở
+  // chatHistory.length < 2 trước khi cần tới — context {} mặc định trong suite này nên
+  // không cần mock trả giá trị thật, chỉ cần tồn tại để không throw "not a function".
+  const agentClient = { summarizeSession: jest.fn() };
   // aiMatching.enabled=false trong suite này → đường llm-router/onboarding cũ giữ nguyên.
   const config = {
     get: jest.fn((key: string, defaultValue?: unknown) =>
@@ -36,6 +42,8 @@ describe('MessageHandler', () => {
       llmRouter as never,
       onboardingFlow as never,
       agentMatchingFlow as never,
+      miniAppSearchFlow as never,
+      agentClient as never,
       config,
     );
   });
@@ -115,7 +123,11 @@ describe('MessageHandler', () => {
     expect(zalo.sendNumberedList).toHaveBeenCalled();
   });
 
-  it('routes free text to agentMatchingFlow when AI matching flag is on', async () => {
+  it('routes free text to agentMatchingFlow when AI matching on + state chưa Matched (agent tự quyết định gửi form hay trả lời chat)', async () => {
+    // Không còn chặn cứng theo convState ở tầng NestJS nữa — mọi tin nhắn (kể cả trước khi
+    // Matched) đều qua agent trước, để PH chat tự do (Q&A/kiến thức chung) mà không bị bắn
+    // thẳng nút form. Agent tự quyết định gửi nút (qua res.reopen_mini_app, xử lý trong
+    // AgentMatchingFlow) hay trả lời thẳng — xem agent-matching.flow.spec cho case đó.
     const aiConfig = {
       get: jest.fn((key: string, defaultValue?: unknown) =>
         key === 'aiMatching.enabled' ? true : key === 'adminZaloUserIds' ? [] : defaultValue,
@@ -127,8 +139,11 @@ describe('MessageHandler', () => {
       llmRouter as never,
       onboardingFlow as never,
       agentMatchingFlow as never,
+      miniAppSearchFlow as never,
+      agentClient as never,
       aiConfig,
     );
+    state.getState.mockResolvedValue(ConversationState.New);
 
     await aiHandler.handle({
       event_name: 'user_send_text',
@@ -137,8 +152,38 @@ describe('MessageHandler', () => {
     } as never);
 
     expect(agentMatchingFlow.handle).toHaveBeenCalledWith('zalo-1', 'tìm gia sư Toán lớp 8 ôn thi');
+    expect(miniAppSearchFlow.sendSearchButton).not.toHaveBeenCalled();
     expect(llmRouter.decide).not.toHaveBeenCalled();
     expect(onboardingFlow.start).not.toHaveBeenCalled();
+  });
+
+  it('routes free text to agentMatchingFlow when AI matching on + state đã Matched (hỏi chi tiết/FAQ)', async () => {
+    const aiConfig = {
+      get: jest.fn((key: string, defaultValue?: unknown) =>
+        key === 'aiMatching.enabled' ? true : key === 'adminZaloUserIds' ? [] : defaultValue,
+      ),
+    } as unknown as ConfigService;
+    const aiHandler = new MessageHandler(
+      state as never,
+      zalo as never,
+      llmRouter as never,
+      onboardingFlow as never,
+      agentMatchingFlow as never,
+      miniAppSearchFlow as never,
+      agentClient as never,
+      aiConfig,
+    );
+    state.getState.mockResolvedValue(ConversationState.Matched);
+
+    await aiHandler.handle({
+      event_name: 'user_send_text',
+      sender: { id: 'zalo-1' },
+      message: { text: 'chi tiết cô Hương' },
+    } as never);
+
+    expect(agentMatchingFlow.handle).toHaveBeenCalledWith('zalo-1', 'chi tiết cô Hương');
+    expect(miniAppSearchFlow.sendSearchButton).not.toHaveBeenCalled();
+    expect(llmRouter.decide).not.toHaveBeenCalled();
   });
 
   it('keeps booking funnel on llm-router path even when AI matching flag is on', async () => {
@@ -156,6 +201,8 @@ describe('MessageHandler', () => {
       llmRouter as never,
       onboardingFlow as never,
       agentMatchingFlow as never,
+      miniAppSearchFlow as never,
+      agentClient as never,
       aiConfig,
     );
 

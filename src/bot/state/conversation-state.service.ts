@@ -174,6 +174,13 @@ export class ConversationStateService {
     await this.redisService.getClient().del(this.matchingKey(zaloUserId));
   }
 
+  /** Thời điểm cập nhật context gần nhất — dùng để phát hiện "quay lại sau gap dài"
+   * (welcome-back, xem message.handler.ts shouldWelcomeBack). null nếu user chưa có context. */
+  async getLastActivity(zaloUserId: string): Promise<Date | null> {
+    const record = await this.getRecord(zaloUserId);
+    return record?.updatedAt ? new Date(record.updatedAt) : null;
+  }
+
   async tryClaimBeEvent(eventId: string): Promise<boolean> {
     const result = await this.redisService
       .getClient()

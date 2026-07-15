@@ -43,6 +43,9 @@ import { ZaloModule } from './zalo/zalo.module';
           .truthy('true')
           .falsy('false')
           .default(false),
+        ZALO_MINI_APP_ID: Joi.string().allow('').optional(),
+        MINI_APP_LINK_SECRET: Joi.string().allow('').optional(),
+        ZALO_MINI_APP_DEV_VERSION: Joi.string().allow('').optional(),
       }),
     }),
     BeClientModule,

@@ -47,6 +47,27 @@ export interface AgentTutorItem {
   profileUrl?: string | null;
 }
 
+/** Body cho POST /api/v1/tutors/search-direct — search THẲNG, KHÔNG qua hội thoại/LLM
+ * (xem tutora-ai/app/services/agent.py::search_tutors_direct). Dùng khi tiêu chí đã rõ từ
+ * form Mini App (id thật), không cần agent hiểu ý tự do. */
+export interface DirectSearchRequestBody {
+  subject_id: number;
+  grade_level_id?: number;
+  goal?: string;
+  preferences?: string;
+  min_rate?: number;
+  max_rate?: number;
+  teaching_mode?: string;
+  city?: string;
+  tutor_gender?: string;
+  exclude_tutor_ids?: string[];
+  top_k?: number;
+}
+
+export interface DirectSearchResponseBody {
+  tutors: AgentTutorItem[];
+}
+
 export interface AgentResponseBody {
   reply: string;
   tutors: AgentTutorItem[];
@@ -56,4 +77,32 @@ export interface AgentResponseBody {
   suggestions: string[];
   /** Slot mới rút được lượt này — merge generic vào agentCtx rồi gửi lại lượt sau. */
   context_patch?: AgentChatContext | null;
+  /** PH muốn đổi tiêu chí tìm gia sư giữa chat -> gửi lại nút mở Mini App (điền sẵn dữ
+   * liệu cũ từ agentCtx) thay vì tiếp tục hỏi qua chat. */
+  reopen_mini_app?: boolean;
+  /** true = PH muốn NHU CẦU KHÁC HẲN — Mini App KHÔNG được auto-skip qua kết quả cũ bằng
+   * prefill, phải để PH tự điền lại. Xem MiniAppButtonService.sendSearchButton. */
+  reopen_mini_app_fresh?: boolean;
+}
+
+/** Body cho POST /api/v1/summarize-session — tóm tắt phiên chat CŨ khi PH quay lại sau gap
+ * dài (welcome-back), xem tutora-ai/app/services/session_memory.py. */
+export interface SummarizeSessionRequestBody {
+  history: AgentHistoryMessage[];
+  shown_tutors: AgentShownTutor[];
+}
+
+export interface SessionMemoryBody {
+  subject?: string | null;
+  grade?: number | null;
+  goal?: string | null;
+  budget_max?: number | null;
+  preferences?: string | null;
+  tutors_shown: string[];
+}
+
+export interface SummarizeSessionResponseBody {
+  recap: string;
+  memory: SessionMemoryBody;
+  has_pending_search: boolean;
 }

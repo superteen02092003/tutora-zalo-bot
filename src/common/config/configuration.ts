@@ -34,6 +34,15 @@ export default () => ({
   aiMatching: {
     enabled: process.env.AI_MATCHING_ENABLED === 'true',
   },
+  // Zalo Mini App — form tìm gia sư thay chat slot-filling (bước khởi tạo search).
+  miniApp: {
+    id: process.env.ZALO_MINI_APP_ID,
+    linkSecret: process.env.MINI_APP_LINK_SECRET,
+    // CHỈ set khi test bản Development chưa Publish (vd "zdev-b12fe263") — thêm
+    // &env=DEVELOPMENT&version=... vào deep link. XOÁ biến này (không set) khi
+    // Mini App đã có bản Publish chính thức, để dùng link production bình thường.
+    devVersion: process.env.ZALO_MINI_APP_DEV_VERSION,
+  },
   zbs: {
     paymentTemplateId: process.env.ZBS_PAYMENT_TEMPLATE_ID,
   },

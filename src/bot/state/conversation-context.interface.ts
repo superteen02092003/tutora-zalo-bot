@@ -51,6 +51,21 @@ export interface ConversationContext {
   agentCtx?: Record<string, unknown>;
   // Gia sư agent đã gợi ý (để agent hiểu "chi tiết cô A" các lượt sau).
   agentShownTutors?: { tutor_id: string; name?: string }[];
+  // ── Welcome-back / session-memory (PH quay lại sau gap dài — xem message.handler.ts
+  // shouldWelcomeBack/startWelcomeBack) ──
+  // true = lượt trước VỪA hỏi "tiếp tục tìm như cũ hay tìm mới?" — lượt này đọc câu trả
+  // lời để rẽ nhánh (handleWelcomeBackReply), KHÔNG xử lý như tin nhắn thường.
+  awaitingWelcomeBack?: boolean;
+  // Facts trích từ phiên CŨ (agent tóm tắt qua /api/v1/summarize-session) — dùng để PH
+  // chọn "tiếp tục" thì tổng hợp lại thành 1 câu tìm luôn, không phải kể lại từ đầu.
+  sessionMemory?: {
+    subject?: string | null;
+    grade?: number | null;
+    goal?: string | null;
+    budgetMax?: number | null;
+    preferences?: string | null;
+    tutorsShown: string[];
+  };
 }
 
 export type OnboardingStep =

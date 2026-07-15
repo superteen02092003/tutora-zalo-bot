@@ -3,8 +3,13 @@ import { join } from 'path';
 import { TutorCandidateDto } from '../be-client/dto';
 
 // ── Canvas ────────────────────────────────────────────────────────────────
+// Vẽ ở W×H gốc (mọi toạ độ trong file này là số tuyệt đối theo kích thước này, không
+// tỷ lệ) rồi DOWNSCALE ảnh PNG xuất ra ở cuối theo OUTPUT_SCALE — card hiện quá to trong
+// khung chat Zalo (phản hồi thật 2026-07-13). Đổi trực tiếp W/H sẽ vỡ layout vì rất nhiều
+// hằng số vị trí/cỡ chữ bên dưới không tính theo W/H.
 const W = 720;
 const H = 440;
+const OUTPUT_SCALE = 0.65;
 const W_L = 284;        // left (navy) panel width
 const CARD_R = 24;
 
@@ -234,7 +239,13 @@ export class TutorCardImageService implements OnModuleInit {
     ctx.lineWidth = 1;
     ctx.stroke();
 
-    return canvas.encode('png');
+    // Downscale ảnh cuối cùng — xem giải thích ở OUTPUT_SCALE.
+    const outW = Math.round(W * OUTPUT_SCALE);
+    const outH = Math.round(H * OUTPUT_SCALE);
+    const outCanvas = createCanvas(outW, outH);
+    const outCtx = outCanvas.getContext('2d');
+    outCtx.drawImage(canvas, 0, 0, outW, outH);
+    return outCanvas.encode('png');
   }
 
   // ── Left panel helpers ────────────────────────────────────────────────────
