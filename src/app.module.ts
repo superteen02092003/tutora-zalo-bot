@@ -36,6 +36,16 @@ import { ZaloModule } from './zalo/zalo.module';
         APP_PUBLIC_URL: Joi.string().uri().allow('').optional(),
         STUB_MODE: Joi.boolean().truthy('true').falsy('false').default(true),
         PORT: Joi.number().port().default(3000),
+        AGENT_BASE_URL: Joi.string().uri().default('http://localhost:8000'),
+        AGENT_API_KEY: Joi.string().allow('').optional(),
+        AGENT_USE_IAM_AUTH: Joi.boolean().truthy('true').falsy('false').default(false),
+        AI_MATCHING_ENABLED: Joi.boolean()
+          .truthy('true')
+          .falsy('false')
+          .default(false),
+        ZALO_MINI_APP_ID: Joi.string().allow('').optional(),
+        MINI_APP_LINK_SECRET: Joi.string().allow('').optional(),
+        ZALO_MINI_APP_DEV_VERSION: Joi.string().allow('').optional(),
       }),
     }),
     BeClientModule,

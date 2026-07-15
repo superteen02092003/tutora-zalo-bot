@@ -37,12 +37,14 @@ export class LlmRouterService {
 
     try {
       const subjectNames = await this.subjectCache.getNames();
+      const history = (params.context.chatHistory ?? []).slice(-10);
       const response = await this.client.chat.completions.create({
         model: this.model,
         response_format: { type: 'json_object' },
         temperature: 0.1,
         messages: [
           { role: 'system', content: this.buildSystemPrompt({ ...params, subjectNames }) },
+          ...history,
           { role: 'user', content: params.message },
         ],
       });
@@ -59,7 +61,7 @@ export class LlmRouterService {
     candidates: TutorCandidateDto[];
     subjectNames: string[];
   }): string {
-    const { state, context, candidates } = params;
+    const { state, context, candidates, subjectNames } = params;
     const currentQuestion = this.deriveCurrentQuestion(state, context);
     const collectedSlots = this.summarizeCollectedSlots(context);
     const candidateList =
@@ -73,8 +75,6 @@ export class LlmRouterService {
     return `Bạn là bộ não định tuyến của chatbot Zalo OA Tutora — nền tảng gia sư tư nhân tại Việt Nam.
 Nhiệm vụ: Phân tích tin nhắn phụ huynh và trả về đúng 1 JSON action.
 
-QUAN TRỌNG: Trong luồng onboarding hiện tại, các bước chọn môn học, cấp học, lớp học, hình thức, và khu vực đều dùng NÚT BẤM — KHÔNG phải nhắn tự do. LLM chỉ được gọi ở bước mô tả tự do (freetext) hoặc các tình huống ngoài onboarding.
-
 TRẠNG THÁI HỆ THỐNG:
 - State: ${state}
 ${collectedSlots ? `- Đã thu thập: ${collectedSlots}` : ''}
@@ -87,12 +87,21 @@ ${currentQuestion ? `- Câu hỏi đang chờ trả lời: "${currentQuestion}"`
 DANH SÁCH ACTION:
 ─────────────────────────────────────────
 
-[A] User đang ở bước freetext (mô tả yêu cầu tự do) — step "freetext":
-{"action":"fill_slot","slot":"freetext","value":"<nội dung mô tả của user>"}
-Dùng khi state=Onboarding VÀ onboardingStep="freetext".
-Nếu user muốn bỏ qua → {"action":"fill_slot","slot":"freetext","value":""}
+[A] User đang trả lời câu hỏi onboarding hiện tại:
+{"action":"fill_slot","slot":"<tên slot>","value":"<giá trị>"}
 
-[B] User muốn tìm gia sư (không đang trong onboarding):
+Slot rules (chỉ fill slot đang được hỏi):
+  • subject  → PHẢI chọn đúng 1 trong danh sách (không được tự tạo giá trị khác): ${subjectNames.join(', ')}
+  • grade    → "Lop X" với X = 1–12 (ví dụ user nói "lớp 11" → "Lop 11")
+  • mode     → "online" (trực tuyến/online/qua video), "offline" (tại nhà/gặp trực tiếp/face-to-face), "both" (linh hoạt/cả hai/đều được)
+  • area     → chuẩn hóa về tên quận/huyện đầy đủ bằng cách suy luận từ input (D2→"Quận 2", BT→"Bình Thạnh", v.v.)
+  • purpose  → "exam_prep" (ôn thi/thi vào 10/THPT quốc gia/thi đại học/luyện thi), "regular" (học thêm/học bình thường/theo chương trình), "foundation" (lấy lại nền/học lại từ đầu/mất căn bản), "advanced" (nâng cao/học sinh giỏi/HSG/phát triển tư duy)
+
+[B] User muốn tìm gia sư VÀ cung cấp đủ thông tin trong 1 tin nhắn (subject, grade, mode, area, v.v.):
+{"action":"bulk_fill_slots","slots":{"subject":"<giá trị>","grade":"<giá trị>","mode":"<giá trị>","area":"<giá trị>","purpose":"<giá trị nếu có>"}}
+Chỉ điền các slot có thông tin rõ ràng, bỏ qua slot không có.
+
+[B2] User muốn tìm gia sư nhưng KHÔNG cung cấp thông tin cụ thể nào:
 {"action":"start_onboarding"}
 
 [C] User chọn gia sư theo tên (state MATCHED, chưa có selectedTutor):
@@ -127,13 +136,15 @@ Mapping: 1/2 buổi/tuần/ít → twice_weekly; 2/3 buổi/tuần/nhiều → t
 ─────────────────────────────────────────
 NGUYÊN TẮC QUAN TRỌNG:
 ─────────────────────────────────────────
-1. Nếu state=Onboarding VÀ onboardingStep="freetext" → luôn dùng [A].
-2. Nếu user đang trong onboarding (không phải bước freetext) → LLM không được điền slot — dùng [I] hoặc [J].
-3. KHÔNG dùng [B] nếu user đang ở giữa onboarding (trừ khi user rõ ràng muốn bắt đầu lại với gia sư khác).
-4. Chỉ dùng [C] nếu tên trong tin nhắn khớp (tương đối) với tên trong danh sách gia sư.
-5. Luôn trả về JSON hợp lệ với đúng cấu trúc của action đã chọn.
-6. CỰC KỲ QUAN TRỌNG — Nếu user nói muốn "tìm gia sư", "đặt gia sư", "tìm thầy/cô", "book tutor" và KHÔNG có activeBookingId → LUÔN dùng [B] (start_onboarding), bất kể selectedTutorName có trong context hay không.
-7. Không được tự suy luận rằng user đã chọn xong gia sư chỉ vì selectedTutorName tồn tại trong context.`;
+0. TUYỆT ĐỐI KHÔNG TỰ BỊA THÔNG TIN. Chỉ điền slot khi user nói RÕ RÀNG. Nếu user chưa đề cập → KHÔNG được suy diễn, đoán mò, hay dùng giá trị mặc định. Ví dụ: user nói "Toán 12" → chỉ điền subject+grade, KHÔNG điền mode/area/purpose. User nói "tìm gia sư Toán" → chỉ điền subject, KHÔNG điền bất cứ thứ gì khác.
+1. Nếu tin nhắn chứa TỪ 2 THÔNG TIN TRỞ LÊN (môn học, lớp, hình thức, khu vực, mục đích) → LUÔN dùng [B] (bulk_fill_slots), chỉ điền đúng các slot user đã nói, bỏ qua slot chưa có.
+2. Chỉ dùng [A] (fill_slot) khi user trả lời đúng 1 thông tin cho câu hỏi đang chờ.
+3. Nếu user đang trong onboarding mà hỏi câu hỏi ngoài lề → dùng [I], KHÔNG điền slot.
+4. Chỉ dùng [B2] (start_onboarding) khi user muốn tìm gia sư nhưng không cung cấp bất kỳ thông tin nào.
+5. Chỉ dùng [C] nếu tên trong tin nhắn khớp (tương đối) với tên trong danh sách gia sư.
+6. Luôn trả về JSON hợp lệ với đúng cấu trúc của action đã chọn.
+7. Không được tự suy luận rằng user đã chọn xong gia sư chỉ vì selectedTutorName tồn tại trong context.
+8. Với action [I] (answer_question): chỉ trả lời dựa trên thông tin đã biết chắc về Tutora. Nếu không chắc → nói "mình chưa có thông tin về vấn đề này, bạn có thể liên hệ đội ngũ Tutora để được hỗ trợ nhé!" thay vì tự bịa.`;
   }
 
   private deriveCurrentQuestion(
@@ -142,12 +153,11 @@ NGUYÊN TẮC QUAN TRỌNG:
   ): string {
     if (state === ConversationState.Onboarding) {
       const map: Record<string, string> = {
-        subject: '[NÚT BẤM] Bạn muốn học môn gì?',
-        grade_group: '[NÚT BẤM] Học sinh đang học cấp mấy?',
-        grade: '[NÚT BẤM] Học sinh đang học lớp mấy?',
-        mode: '[NÚT BẤM] Bạn muốn học online, tại nhà, hay linh hoạt cả hai?',
-        area: '[NÚT BẤM] Bạn đang ở thành phố nào?',
-        freetext: 'Bạn có mô tả thêm về yêu cầu không? (tự do nhắn hoặc bỏ qua)',
+        subject: 'Bạn muốn học môn nào?',
+        grade: 'Học sinh đang học lớp mấy?',
+        mode: 'Bạn muốn học online, tại nhà, hay linh hoạt cả hai?',
+        area: 'Bạn muốn học khu vực quận/huyện nào?',
+        purpose: 'Mục tiêu học là gì? (ôn thi / học thêm / lấy lại nền / nâng cao)',
       };
       return map[context.onboardingStep ?? ''] ?? '';
     }

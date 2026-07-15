@@ -1,13 +1,15 @@
 import { HttpService } from '@nestjs/axios';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { lastValueFrom } from 'rxjs';
 import { RedisService } from '../common/redis/redis.service';
 
-// Bot đọc AccessToken từ Redis key của backend (zalo:oa:access_token).
-// Backend là nơi duy nhất refresh token — tránh xung đột rotating RefreshToken.
+// Bot đọc AccessToken từ Redis key của backend (zalo:oa:access_token) — backend
+// (Tutora-Backend .NET, ZaloOAService + ZaloTokenRefreshJob) là nơi DUY NHẤT refresh
+// token. Trước đây bot tự refresh riêng (key khác: "zalo:oa:token") → 2 service cùng xoay
+// vòng refresh_token dùng-1-lần-rồi-mất-hiệu-lực của Zalo, dẫm chân nhau khiến token bị
+// invalidate — nguyên nhân thật của sự cố "-14014 refresh token invalid" phải OAuth
+// re-auth lại từ đầu (2026-07-14). Bot giờ CHỈ đọc, không tự refresh nữa.
 const BACKEND_REDIS_KEY = 'zalo:oa:access_token';
-const SEED_LIFETIME_MS = 23 * 60 * 60 * 1000;
 
 @Injectable()
 export class ZaloTokenService implements OnModuleInit {

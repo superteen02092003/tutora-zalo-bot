@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { AgentClientService } from '../../agent/agent-client.service';
 import { BeClientService } from '../../be-client/be-client.service';
-import { TutorCandidateDto, TutorSubscriptionType } from '../../be-client/dto';
+import { MatchCriteria, TutorCandidateDto, TutorSubscriptionType } from '../../be-client/dto';
 import { ZaloService } from '../../zalo/zalo.service';
 import { ConversationState } from '../state/conversation-state.enum';
 import { ConversationStateService } from '../state/conversation-state.service';
@@ -15,6 +16,7 @@ export class MatchingFlow {
 
   constructor(
     private readonly beClient: BeClientService,
+    private readonly agentClient: AgentClientService,
     private readonly state: ConversationStateService,
     private readonly zalo: ZaloService,
     config: ConfigService,
@@ -25,40 +27,38 @@ export class MatchingFlow {
     );
   }
 
-  /**
-   * Show tutor matches to the user.
-   *
-   * @param zaloUserId       Zalo user to send results to.
-   * @param rankedCandidates Pre-ranked candidates from the onboarding flow (AI-reordered).
-   *                         If omitted, falls back to fetching directly from .NET BE.
-   */
-  async showMatches(zaloUserId: string, rankedCandidates?: TutorCandidateDto[]): Promise<void> {
+  async showMatches(zaloUserId: string): Promise<void> {
     const context = await this.state.getContext(zaloUserId);
-    const lang = context.preferredLanguage ?? 'vi';
 
-    let candidates: TutorCandidateDto[];
-
-    if (rankedCandidates !== undefined) {
-      // Use the pre-ranked candidates provided by onboardingFlow.triggerMatching()
-      candidates = rankedCandidates;
-
-      // Persist to Redis so downstream flows (select_tutor, etc.) can look them up
-      await this.state.setMatchingCandidates(zaloUserId, candidates);
-    } else {
-      // Fallback: fetch directly from .NET BE (direct call without AI re-ranking)
-      if (!context.criteria) {
-        await this.zalo.sendText(
-          zaloUserId,
-          lang === 'en' ? 'I need a bit more information to find tutors.' : 'Mình cần thêm thông tin để tìm gia sư.',
-        );
-        return;
-      }
-
-      const result = await this.beClient.getMatchedTutors(context.criteria);
-      await this.state.updateContext(zaloUserId, { subjectId: result.subjectId });
-      await this.state.setMatchingCandidates(zaloUserId, result.candidates);
-      candidates = result.candidates;
+    if (!context.criteria) {
+      const lang = context.preferredLanguage ?? 'vi';
+      await this.zalo.sendText(
+        zaloUserId,
+        lang === 'en' ? 'I need a bit more information to find tutors.' : 'Mình cần thêm thông tin để tìm gia sư.',
+      );
+      return;
     }
+
+    const result = await this.beClient.getMatchedTutors(context.criteria);
+    await this.state.updateContext(zaloUserId, { subjectId: result.subjectId });
+
+    // AI rerank theo mức liên quan ngữ nghĩa (embedding) — .NET chỉ hard-filter (đúng
+    // môn/lớp/khu vực...), thứ tự trong cùng 1 filter chưa phản ánh mức "hợp" với nhu cầu
+    // thật của PH. Lỗi/rỗng → rankCandidates tự trả lại đúng thứ tự gốc, không chặn hiển thị.
+    let candidates = result.candidates;
+    if (candidates.length > 0) {
+      const query = this.buildQueryFromCriteria(context.criteria);
+      const candidateIds = candidates.map((c) => c.tutorId);
+      const rankedIds = await this.agentClient.rankCandidates(query, candidateIds, 10);
+      const byId = new Map(candidates.map((c) => [c.tutorId, c]));
+      const reordered = rankedIds
+        .map((id) => byId.get(id))
+        .filter((c): c is TutorCandidateDto => c !== undefined);
+      if (reordered.length > 0) candidates = reordered;
+    }
+    await this.state.setMatchingCandidates(zaloUserId, candidates);
+
+    const lang = context.preferredLanguage ?? 'vi';
 
     if (candidates.length === 0) {
       await this.zalo.sendText(
@@ -97,13 +97,36 @@ export class MatchingFlow {
     }
   }
 
+  // Query tự do cho AI rerank — ghép từ tiêu chí CỨNG đã thu (không có freetext step
+  // trong wizard nút bấm này, khác wizard Mini App/agent chat).
+  private buildQueryFromCriteria(criteria: MatchCriteria): string {
+    const parts = [`${criteria.subject} lớp ${criteria.grade}`];
+    if (criteria.purpose) {
+      const purposeLabel: Record<string, string> = {
+        exam_prep: 'ôn thi',
+        regular: 'học thường xuyên',
+        foundation: 'mất gốc, cần củng cố',
+        advanced: 'nâng cao',
+      };
+      parts.push(purposeLabel[criteria.purpose] ?? criteria.purpose);
+    }
+    if (criteria.genderPreference && criteria.genderPreference !== 'any') {
+      parts.push(criteria.genderPreference === 'female' ? 'ưu tiên gia sư nữ' : 'ưu tiên gia sư nam');
+    }
+    return parts.join(', ');
+  }
+
   // Returns at most 3 candidates — one per tier, in Standard→Pro→Premium order.
+  // Falls back to top 3 by rating if none match a tier.
   private pickOnePer(candidates: TutorCandidateDto[]): TutorCandidateDto[] {
     const picked = TIER_ORDER
-      .map((tier) => candidates.find((c) => c.subscriptionType === tier))
+      .map((tier) => {
+        const inTier = candidates.filter((c) => c.subscriptionType === tier);
+        return inTier.sort((a, b) => b.averageRating - a.averageRating)[0];
+      })
       .filter((c): c is TutorCandidateDto => !!c);
 
     if (picked.length > 0) return picked;
-    return candidates.slice(0, 3);
+    return [...candidates].sort((a, b) => b.averageRating - a.averageRating).slice(0, 3);
   }
 }

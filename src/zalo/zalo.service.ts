@@ -289,8 +289,7 @@ export class ZaloService {
     tutor: TutorCandidateDto,
     profileBaseUrl: string,
     language: 'vi' | 'en' = 'vi',
-    // Payload nút "Đặt lịch". Mặc định select_tutor (guided cũ);
-    // agent truyền 'agent_book:<id>' để nút quay về AgentHandler, không rớt sang guided.
+    // Payload nút "Đặt lịch". Mặc định select_tutor (guided cũ).
     bookPayload?: string,
   ): Promise<void> {
     const cacheKey = `tutor_card_attachment:${tutor.tutorId}:${language}`;
