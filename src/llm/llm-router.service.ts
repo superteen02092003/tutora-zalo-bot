@@ -91,7 +91,6 @@ DANH SÁCH ACTION:
 {"action":"fill_slot","slot":"<tên slot>","value":"<giá trị>"}
 
 Slot rules (chỉ fill slot đang được hỏi):
-  • language → "vi" nếu user chọn Tiếng Việt/Vietnamese, "en" nếu user chọn English/tiếng Anh
   • subject  → PHẢI chọn đúng 1 trong danh sách (không được tự tạo giá trị khác): ${subjectNames.join(', ')}
   • grade    → "Lop X" với X = 1–12 (ví dụ user nói "lớp 11" → "Lop 11")
   • mode     → "online" (trực tuyến/online/qua video), "offline" (tại nhà/gặp trực tiếp/face-to-face), "both" (linh hoạt/cả hai/đều được)
@@ -154,7 +153,6 @@ NGUYÊN TẮC QUAN TRỌNG:
   ): string {
     if (state === ConversationState.Onboarding) {
       const map: Record<string, string> = {
-        language: 'Bạn muốn dùng Tiếng Việt hay English?',
         subject: 'Bạn muốn học môn nào?',
         grade: 'Học sinh đang học lớp mấy?',
         mode: 'Bạn muốn học online, tại nhà, hay linh hoạt cả hai?',

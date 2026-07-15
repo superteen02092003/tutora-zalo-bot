@@ -77,7 +77,7 @@ export class OnboardingFlow {
       (await this.beClient.upsertZaloLead(zaloUserId));
 
     const existingCtx = await this.state.getContext(zaloUserId);
-    const preferredLanguage: BotLanguage = (slots['language'] as BotLanguage) ?? existingCtx.preferredLanguage ?? 'vi';
+    const preferredLanguage: BotLanguage = existingCtx.preferredLanguage ?? 'vi';
 
     // Build criteria directly from slots without triggering intermediate questions
     const criteria: MatchCriteria = {
@@ -178,16 +178,6 @@ export class OnboardingFlow {
     const context = await this.state.getContext(zaloUserId);
 
     switch (slot) {
-      case 'language': {
-        const preferredLanguage: BotLanguage = value === 'en' ? 'en' : 'vi';
-        await this.state.updateContext(zaloUserId, {
-          preferredLanguage,
-          onboardingStep: 'subject',
-        });
-        await this.askSubject(zaloUserId, preferredLanguage);
-        break;
-      }
-
       case 'subject': {
         await this.updateCriteria(zaloUserId, context, { subject: value });
         await this.state.updateContext(zaloUserId, { onboardingStep: 'grade' });

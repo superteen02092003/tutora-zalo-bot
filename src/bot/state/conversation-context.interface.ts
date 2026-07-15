@@ -69,7 +69,6 @@ export interface ConversationContext {
 }
 
 export type OnboardingStep =
-  | 'language'
   | 'subject'
   | 'grade'
   | 'mode'

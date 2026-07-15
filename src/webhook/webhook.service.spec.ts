@@ -1,5 +1,5 @@
 import { UnauthorizedException } from '@nestjs/common';
-import { createHmac } from 'crypto';
+import { createHash } from 'crypto';
 import { WebhookService } from './webhook.service';
 
 describe('WebhookService', () => {
@@ -34,18 +34,24 @@ describe('WebhookService', () => {
     );
   });
 
-  it('verifies valid Zalo HMAC signatures', () => {
+  it('verifies valid Zalo signatures', () => {
     const rawBody = Buffer.from('{"event_name":"follow"}');
-    const signature = createHmac('sha256', 'zalo-secret')
-      .update(rawBody)
+    const body = { event_name: 'follow', app_id: 'app-1', timestamp: '1700000000' };
+    const mac = createHash('sha256')
+      .update(body.app_id + rawBody.toString('utf8') + body.timestamp + 'zalo-secret')
       .digest('hex');
 
-    expect(() => service.verifyZaloSignature(signature, rawBody)).not.toThrow();
+    expect(() =>
+      service.verifyZaloSignature(`mac=${mac}`, rawBody, body),
+    ).not.toThrow();
   });
 
-  it('rejects invalid Zalo HMAC signatures', () => {
+  it('rejects invalid Zalo signatures', () => {
+    const rawBody = Buffer.from('{"event_name":"follow"}');
+    const body = { event_name: 'follow', app_id: 'app-1', timestamp: '1700000000' };
+
     expect(() =>
-      service.verifyZaloSignature('bad-signature', Buffer.from('{}')),
+      service.verifyZaloSignature('mac=bad-signature', rawBody, body),
     ).toThrow(UnauthorizedException);
   });
 

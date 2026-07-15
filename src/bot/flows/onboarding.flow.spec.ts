@@ -14,7 +14,7 @@ describe('OnboardingFlow', () => {
     updateContext: jest.fn(),
   };
   const zalo = {
-    sendInteractiveQuickReply: jest.fn(),
+    sendQuickReply: jest.fn(),
     sendNumberedList: jest.fn(),
     sendText: jest.fn(),
   };
@@ -34,12 +34,13 @@ describe('OnboardingFlow', () => {
     );
   });
 
-  it('upserts a new Zalo lead and starts with language selection', async () => {
+  it('upserts a new Zalo lead and starts onboarding by asking for subject', async () => {
     beClient.getUserByZaloId.mockResolvedValue(null);
     beClient.upsertZaloLead.mockResolvedValue({
       userId: 'parent-1',
       zaloUserId: 'zalo-1',
     });
+    state.getContext.mockResolvedValue({});
 
     await flow.start('zalo-1');
 
@@ -52,34 +53,16 @@ describe('OnboardingFlow', () => {
       'zalo-1',
       expect.objectContaining({
         parentId: 'parent-1',
-        onboardingStep: 'language',
+        onboardingStep: 'subject',
       }),
     );
     expect(state.setState).toHaveBeenCalledWith(
       'zalo-1',
       ConversationState.Onboarding,
     );
-    expect(zalo.sendInteractiveQuickReply).toHaveBeenCalledWith(
+    expect(zalo.sendText).toHaveBeenCalledWith(
       'zalo-1',
-      expect.stringContaining('chọn ngôn ngữ'),
-      expect.any(Array),
-    );
-  });
-
-  it('applySlot language stores preference and asks for subject', async () => {
-    state.getContext.mockResolvedValue({ zaloUserId: 'zalo-1' });
-    beClient.getSubjects.mockResolvedValue([{ subjectId: 1, name: 'Toan' }]);
-
-    await flow.applySlot('zalo-1', 'language', 'en');
-
-    expect(state.updateContext).toHaveBeenCalledWith('zalo-1', {
-      preferredLanguage: 'en',
-      onboardingStep: 'subject',
-    });
-    expect(zalo.sendInteractiveQuickReply).toHaveBeenCalledWith(
-      'zalo-1',
-      expect.stringContaining('Which subject'),
-      expect.any(Array),
+      expect.stringContaining('môn gì'),
     );
   });
 
@@ -102,7 +85,7 @@ describe('OnboardingFlow', () => {
     );
   });
 
-  it('applySlot grade advances to area step', async () => {
+  it('applySlot grade advances to mode step', async () => {
     state.getContext.mockResolvedValue({
       zaloUserId: 'zalo-1',
       preferredLanguage: 'vi',
@@ -113,11 +96,12 @@ describe('OnboardingFlow', () => {
 
     expect(state.updateContext).toHaveBeenCalledWith(
       'zalo-1',
-      expect.objectContaining({ onboardingStep: 'area' }),
+      expect.objectContaining({ onboardingStep: 'mode' }),
     );
-    expect(zalo.sendText).toHaveBeenCalledWith(
+    expect(zalo.sendQuickReply).toHaveBeenCalledWith(
       'zalo-1',
-      expect.stringContaining('quận/huyện'),
+      expect.stringContaining('hình thức'),
+      expect.any(Array),
     );
   });
 
