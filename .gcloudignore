@@ -1,0 +1,18 @@
+# This file specifies files that are *not* uploaded to Google Cloud
+# using gcloud. It follows the same syntax as .gitignore files.
+
+.gcloudignore
+.git
+.gitignore
+
+node_modules/
+dist/
+coverage/
+.nyc_output/
+
+*.tsbuildinfo
+.env
+.env.*
+
+# Accidental nested clone of this repo — breaks tsc rootDir inference if uploaded.
+tutora-zalo-bot/
