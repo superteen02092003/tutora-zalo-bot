@@ -1,0 +1,62 @@
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'Dockerfile'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch: {}
+
+env:
+  PROJECT_ID: tutora-ai
+  REGION: asia-southeast1
+  SERVICE: tutora-zalo-bot
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: Build & Deploy to Cloud Run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          workload_identity_provider: projects/297280227892/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: github-deployer@tutora-ai.iam.gserviceaccount.com
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy to Cloud Run (build from source)
+        run: |
+          gcloud run deploy "$SERVICE" \
+            --source . \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --quiet
+        env:
+          SERVICE: ${{ env.SERVICE }}
+          PROJECT_ID: ${{ env.PROJECT_ID }}
+          REGION: ${{ env.REGION }}
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          echo "### Deploy tutora-zalo-bot to Cloud Run 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "- **Service**: $SERVICE ($REGION)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+        env:
+          SERVICE: ${{ env.SERVICE }}
+          REGION: ${{ env.REGION }}
