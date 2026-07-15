@@ -69,7 +69,13 @@ export class BeClientService {
 
   async getSubjects(): Promise<SubjectDto[]> {
     if (!this.stubMode) {
-      return this.get<SubjectDto[]>('/internal/subjects');
+      const res = await this.get<{
+        content: { subjectId: number; subjectName: string }[];
+      }>('/api/subjects');
+      return (res.content ?? []).map((s) => ({
+        subjectId: s.subjectId,
+        name: s.subjectName,
+      }));
     }
 
     return [

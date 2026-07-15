@@ -1,6 +1,6 @@
 services:
   app:
-    build: .
+    image: ghcr.io/haiquanng/tutora-zalo-bot:latest
     container_name: tutora-zalo-bot
     restart: unless-stopped
     ports:

@@ -180,7 +180,7 @@ export class TutorCardImageService implements OnModuleInit {
     ctx.textBaseline = 'middle';
     ctx.font = `700 16px "${SANS}"`;
     ctx.fillStyle = C.navy;
-    const scoreText = tutor.averageRating.toFixed(1);
+    const scoreText = (tutor.averageRating ?? 0).toFixed(1);
     ctx.fillText(scoreText, RP_X + 120, ratingY);
     const sw = ctx.measureText(scoreText).width;
     ctx.font = `400 13px "${SANS}"`;
@@ -220,7 +220,13 @@ export class TutorCardImageService implements OnModuleInit {
     ctx.fill();
 
     const priceCY = pbY + pbH / 2;
-    const priceNum = tutor.hourlyRate.toLocaleString('vi-VN');
+    // .NET recommend trả 'pricePerHour'; guided cũ dùng 'hourlyRate'. Fallback đủ cả.
+    const rate =
+      (tutor as { pricePerHour?: number }).pricePerHour ??
+      tutor.hourlyRate ??
+      tutor.price_min ??
+      0;
+    const priceNum = rate.toLocaleString('vi-VN');
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.font = `700 38px "${this.displayFamily}"`;
