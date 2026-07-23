@@ -12,7 +12,8 @@ const TUTOR_CARD_ATTACHMENT_TTL = 3 * 24 * 60 * 60; // 3 days
 const ZALO_CS_URL = 'https://openapi.zalo.me/v3.0/oa/message/cs';
 const ZALO_PROMO_URL = 'https://openapi.zalo.me/v3.0/oa/message/promotion';
 const ZALO_UPLOAD_IMAGE_URL = 'https://openapi.zalo.me/v2.0/oa/upload/image';
-const ZALO_ZBS_TEMPLATE_URL = 'https://openapi.zalo.me/v3.0/oa/message/template';
+const ZALO_ZBS_TEMPLATE_URL =
+  'https://openapi.zalo.me/v3.0/oa/message/template';
 
 @Injectable()
 export class ZaloService {
@@ -31,7 +32,11 @@ export class ZaloService {
     await this.sendMessage(userId, { text });
   }
 
-  async sendImage(userId: string, imageUrl: string, caption?: string): Promise<void> {
+  async sendImage(
+    userId: string,
+    imageUrl: string,
+    caption?: string,
+  ): Promise<void> {
     const message: Record<string, unknown> = {
       attachment: {
         type: 'template',
@@ -55,7 +60,9 @@ export class ZaloService {
   ): Promise<string> {
     const accessToken = await this.tokenService.getAccessToken();
     if (!accessToken) {
-      this.logger.debug(`[stub/upload-image] ${filename} (${image.length} bytes)`);
+      this.logger.debug(
+        `[stub/upload-image] ${filename} (${image.length} bytes)`,
+      );
       return 'stub-attachment-id';
     }
 
@@ -80,7 +87,9 @@ export class ZaloService {
       data?: { attachment_id?: string };
     };
     if (data.error !== 0 || !data.data?.attachment_id) {
-      throw new Error(`Zalo upload image error ${data.error}: ${data.message ?? 'unknown'}`);
+      throw new Error(
+        `Zalo upload image error ${data.error}: ${data.message ?? 'unknown'}`,
+      );
     }
 
     return data.data.attachment_id;
@@ -141,7 +150,9 @@ export class ZaloService {
 
       const data = res.data as { error?: number; message?: string };
       if (data.error !== 0) {
-        throw new Error(`ZBS template error ${data.error}: ${data.message ?? 'unknown'}`);
+        throw new Error(
+          `ZBS template error ${data.error}: ${data.message ?? 'unknown'}`,
+        );
       }
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -199,7 +210,8 @@ export class ZaloService {
               buttons: element.buttons.slice(0, 3).map((btn) => ({
                 title: btn.title,
                 type: btn.type === 'url' ? 'oa.open.url' : 'oa.query.hide',
-                payload: btn.type === 'url' ? { url: btn.payload } : btn.payload,
+                payload:
+                  btn.type === 'url' ? { url: btn.payload } : btn.payload,
               })),
             },
           },
@@ -248,7 +260,11 @@ export class ZaloService {
   ): Promise<void> {
     const lines = [text, ''];
     options.forEach((opt, i) => {
-      lines.push(opt.hint ? `${i + 1}. ${opt.label} (${opt.hint})` : `${i + 1}. ${opt.label}`);
+      lines.push(
+        opt.hint
+          ? `${i + 1}. ${opt.label} (${opt.hint})`
+          : `${i + 1}. ${opt.label}`,
+      );
     });
     await this.sendText(userId, lines.join('\n'));
   }
@@ -256,7 +272,10 @@ export class ZaloService {
   // sendInteractiveListCard: compact tutor card — text info + 2 buttons in 1 message.
   // Zalo CS endpoint only supports plain button attachment (no template_type).
   // Layout per card: name + tier + rating + price | [Xem chi tiết] [Đặt lịch]
-  async sendInteractiveListCard(userId: string, elements: ListElement[]): Promise<void> {
+  async sendInteractiveListCard(
+    userId: string,
+    elements: ListElement[],
+  ): Promise<void> {
     if (elements.length === 0) return;
 
     for (const element of elements) {
@@ -287,27 +306,36 @@ export class ZaloService {
   async sendTutorCard(
     userId: string,
     tutor: TutorCandidateDto,
-    profileBaseUrl: string,
+    detailUrl: string,
+    bookingUrl: string,
     language: 'vi' | 'en' = 'vi',
-    // Payload nút "Đặt lịch". Mặc định select_tutor (guided cũ).
-    bookPayload?: string,
   ): Promise<void> {
     const cacheKey = `tutor_card_attachment:${tutor.tutorId}:${language}`;
     let attachmentId = await this.redis.getClient().get(cacheKey);
 
     if (!attachmentId) {
       const cardBuffer = await this.tutorCardImage.generate(tutor, language);
-      attachmentId = await this.uploadImageBuffer(cardBuffer, `tutor-${tutor.tutorId}.png`);
-      await this.redis.getClient().setex(cacheKey, TUTOR_CARD_ATTACHMENT_TTL, attachmentId);
-      this.logger.log(`Tutor card cached: ${tutor.tutorId}:${language} → ${attachmentId}`);
+      attachmentId = await this.uploadImageBuffer(
+        cardBuffer,
+        `tutor-${tutor.tutorId}.png`,
+      );
+      await this.redis
+        .getClient()
+        .setex(cacheKey, TUTOR_CARD_ATTACHMENT_TTL, attachmentId);
+      this.logger.log(
+        `Tutor card cached: ${tutor.tutorId}:${language} → ${attachmentId}`,
+      );
     } else {
       this.logger.log(`Tutor card cache hit: ${tutor.tutorId}:${language}`);
     }
 
     await this.sendUploadedImage(userId, attachmentId);
 
-    // Send buttons below
-    const profileUrl = `${profileBaseUrl}/${tutor.tutorId}`;
+    // Cả 2 nút đều mở thẳng Mini App (zalo.me/s/... — Zalo tự nhận domain của mình và mở
+    // Mini App thay vì trình duyệt ngoài, dù type là oa.open.url). "Đặt lịch" trỏ tới CÙNG
+    // trang chi tiết nhưng kèm ?openBooking=1 để tự mở BookingModal — không còn round-trip
+    // qua bot (bỏ hẳn select_tutor: postback + hỏi gói qua chat text, xem
+    // MiniAppButtonService.buildTutorDetailLink).
     await this.sendMessage(userId, {
       text: tutor.fullName,
       attachment: {
@@ -317,12 +345,12 @@ export class ZaloService {
             {
               title: language === 'en' ? 'View profile' : 'Xem chi tiết',
               type: 'oa.open.url',
-              payload: { url: profileUrl },
+              payload: { url: detailUrl },
             },
             {
               title: language === 'en' ? 'Book session' : 'Đặt lịch',
-              type: 'oa.query.hide',
-              payload: bookPayload ?? `select_tutor:${tutor.tutorId}`,
+              type: 'oa.open.url',
+              payload: { url: bookingUrl },
             },
           ],
         },
@@ -370,11 +398,15 @@ export class ZaloService {
           { headers: { access_token: accessToken } },
         ),
       );
-      this.logger.log(`Zalo API [${endpoint}] response: ${JSON.stringify(res.data)}`);
+      this.logger.log(
+        `Zalo API [${endpoint}] response: ${JSON.stringify(res.data)}`,
+      );
 
       const data = res.data as { error?: number; message?: string };
       if (data.error !== 0) {
-        throw new Error(`Zalo API error ${data.error}: ${data.message ?? 'unknown'}`);
+        throw new Error(
+          `Zalo API error ${data.error}: ${data.message ?? 'unknown'}`,
+        );
       }
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);

@@ -3,13 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { MiniAppTokenService, SupportedLang } from './mini-app-token.service';
 import { ZaloService } from '../zalo/zalo.service';
 
-/**
- * Gửi nút mở Mini App tìm gia sư — tách riêng khỏi MiniAppSearchFlow để tránh circular
- * dependency: AgentMatchingFlow cần gọi sendSearchButton() (khi PH muốn đổi tiêu chí giữa
- * chat — xem intent "change_context" bên tutora-ai), nhưng MiniAppSearchFlow lại inject
- * AgentMatchingFlow (để handleFormSubmit gọi runTurn). Tách logic gửi nút ra đây để cả 2
- * chiều cùng dùng chung mà không phụ thuộc vòng nhau.
- */
+/** Gửi nút mở Mini App tìm gia sư — dùng bởi MessageHandler cho mọi tin nhắn (chatbot chỉ
+ * còn vai trò điều hướng, không còn matching qua chat/LLM). */
 @Injectable()
 export class MiniAppButtonService {
   private readonly logger = new Logger(MiniAppButtonService.name);
@@ -31,9 +26,15 @@ export class MiniAppButtonService {
    * PHẢI để form trống cho PH điền lại, KHÔNG được tự auto-skip qua kết quả cũ dù prefill
    * còn dữ liệu (xem MiniAppSearchFormPage.tsx). Bug thật 2026-07-14: thiếu cờ này khiến
    * chọn "nhu cầu khác" vẫn tự hiện lại kết quả CŨ trước khi PH kịp điền gì mới. */
-  async sendSearchButton(userId: string, lang: SupportedLang = 'vi', fresh = false): Promise<void> {
+  async sendSearchButton(
+    userId: string,
+    lang: SupportedLang = 'vi',
+    fresh = false,
+  ): Promise<void> {
     if (!this.miniAppId) {
-      this.logger.error('ZALO_MINI_APP_ID chưa cấu hình — không gửi được nút Mini App.');
+      this.logger.error(
+        'ZALO_MINI_APP_ID chưa cấu hình — không gửi được nút Mini App.',
+      );
       await this.zalo.sendText(
         userId,
         lang === 'en'
@@ -73,5 +74,19 @@ export class MiniAppButtonService {
         buttons: [{ title: card.buttonTitle, type: 'url', payload: deepLink }],
       },
     ]);
+  }
+
+  /** Deep link mở thẳng trang chi tiết gia sư trong Mini App (route /tutor-detail/:id có
+   * sẵn, xem Tutora-FE/src/pages/TutorDetail/TutorDetailPage.tsx). Dùng cho nút "Xem chi
+   * tiết"/"Đặt lịch" trên tutor card — thay thế hẳn luồng postback select_tutor: + hỏi gói
+   * qua chat text (2026-07-18: bỏ DeepSeek/executeDecision, PH đặt lịch qua UI BookingModal
+   * đã có sẵn thay vì chọn gói/lịch bằng chat tự do). `openBooking=1` khiến TutorDetailPage
+   * tự mở BookingModal ngay khi trang load xong (xem useEffect đọc searchParams). */
+  buildTutorDetailLink(tutorId: string, openBooking = false): string {
+    const devParams = this.devVersion
+      ? `&env=DEVELOPMENT&version=${encodeURIComponent(this.devVersion)}`
+      : '';
+    const path = `/tutor-detail/${tutorId}${openBooking ? '?openBooking=1' : ''}`;
+    return `https://zalo.me/s/${this.miniAppId}/?path=${encodeURIComponent(path)}${devParams}`;
   }
 }

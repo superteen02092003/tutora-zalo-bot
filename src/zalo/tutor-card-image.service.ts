@@ -192,7 +192,7 @@ export class TutorCardImageService implements OnModuleInit {
     ctx.fillStyle = C.line;
     ctx.fillRect(RP_X, 156, RP_W, 1);
 
-    // Hours + teaching mode
+    // Completed lessons, unique taught students + teaching mode
     const hoursY = 184;
     const modeLabel =
       tutor.teachingMode === 'online' ? 'Online'
@@ -202,11 +202,11 @@ export class TutorCardImageService implements OnModuleInit {
     ctx.fillStyle = C.brown70;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    const hoursText = language === 'en'
-      ? `${tutor.completedHours} teaching hrs`
-      : `${tutor.completedHours} giờ dạy`;
-    ctx.fillText(hoursText, RP_X, hoursY);
-    const htw = ctx.measureText(hoursText).width;
+    const experienceText = language === 'en'
+      ? `${tutor.totalCompletedLessons} lessons · ${tutor.totalStudentsTaught} students`
+      : `${tutor.totalCompletedLessons} buổi · ${tutor.totalStudentsTaught} học sinh`;
+    ctx.fillText(experienceText, RP_X, hoursY);
+    const htw = ctx.measureText(experienceText).width;
     ctx.fillStyle = 'rgba(62,47,40,0.15)';
     ctx.fillRect(RP_X + htw + 14, hoursY - 7, 1, 14);
     ctx.fillStyle = C.brown70;

@@ -53,7 +53,9 @@ export class WebhookService {
     const appId = String(body.app_id ?? '');
     const timestamp = String(body.timestamp ?? '');
     const expectedSignature = createHash('sha256')
-      .update(appId + rawBody.toString('utf8') + timestamp + this.zaloWebhookSecret)
+      .update(
+        appId + rawBody.toString('utf8') + timestamp + this.zaloWebhookSecret,
+      )
       .digest('hex');
 
     if (!this.safeEqual(mac, expectedSignature)) {
@@ -73,9 +75,11 @@ export class WebhookService {
 
     this.logger.log(
       `Zalo event: ${eventType} | user=${userId}` +
-      ` | text="${text}"` +
-      (postbackData ? ` | postback.data="${postbackData}"` : '') +
-      (quickReplyPayload ? ` | quick_reply.payload="${quickReplyPayload}"` : ''),
+        ` | text="${text}"` +
+        (postbackData ? ` | postback.data="${postbackData}"` : '') +
+        (quickReplyPayload
+          ? ` | quick_reply.payload="${quickReplyPayload}"`
+          : ''),
     );
 
     switch (eventType) {
@@ -90,12 +94,22 @@ export class WebhookService {
       case 'postback':
         await this.postbackHandler.handle(event);
         break;
-      case 'oa_send_text':
       case 'unfollow':
+        // PH huỷ quan tâm OA -> xoá sạch context hội thoại. Nếu không, follow lại vẫn
+        // "nhớ" agentCtx cũ (Zalo phía họ đã xoá lịch sử chat rồi, nhưng bot vẫn giữ
+        // state riêng trong Redis) -> Mini App prefill lại tiêu chí cũ không còn hợp lý.
+        if (userId !== 'unknown') {
+          await this.conversationState.resetConversation(userId);
+          this.logger.log(`Unfollow: đã xoá context cho user=${userId}`);
+        }
+        break;
+      case 'oa_send_text':
         this.logger.debug(`Ignoring Zalo event type: ${eventType}`);
         break;
       default:
-        this.logger.warn(`Unknown Zalo event type: ${eventType ?? 'missing'} | raw: ${JSON.stringify(event).slice(0, 200)}`);
+        this.logger.warn(
+          `Unknown Zalo event type: ${eventType ?? 'missing'} | raw: ${JSON.stringify(event).slice(0, 200)}`,
+        );
     }
   }
 
