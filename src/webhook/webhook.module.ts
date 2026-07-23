@@ -6,12 +6,8 @@ import { FollowHandler } from '../bot/handlers/follow.handler';
 import { MessageHandler } from '../bot/handlers/message.handler';
 import { PostbackHandler } from '../bot/handlers/postback.handler';
 import { ConversationStateModule } from '../bot/state/conversation-state.module';
-import { AgentMatchingFlow } from '../bot/flows/agent-matching.flow';
-import { MatchingFlow } from '../bot/flows/matching.flow';
 import { MiniAppSearchFlow } from '../bot/flows/mini-app-search.flow';
-import { OnboardingFlow } from '../bot/flows/onboarding.flow';
 import { RedisModule } from '../common/redis/redis.module';
-import { LlmModule } from '../llm/llm.module';
 import { MiniAppTokenService } from '../mini-app/mini-app-token.service';
 import { MiniAppButtonService } from '../mini-app/mini-app-button.service';
 import { ZaloModule } from '../zalo/zalo.module';
@@ -22,7 +18,13 @@ import { WebhookController } from './webhook.controller';
 import { WebhookService } from './webhook.service';
 
 @Module({
-  imports: [AgentModule, BeClientModule, ConversationStateModule, LlmModule, RedisModule, ZaloModule],
+  imports: [
+    AgentModule,
+    BeClientModule,
+    ConversationStateModule,
+    RedisModule,
+    ZaloModule,
+  ],
   controllers: [WebhookController, BeEventsController, MiniAppController],
   providers: [
     WebhookService,
@@ -30,12 +32,9 @@ import { WebhookService } from './webhook.service';
     MessageHandler,
     PostbackHandler,
     BeEventHandler,
-    AgentMatchingFlow,
     MiniAppSearchFlow,
     MiniAppTokenService,
     MiniAppButtonService,
-    OnboardingFlow,
-    MatchingFlow,
     UserSerialQueue,
   ],
 })

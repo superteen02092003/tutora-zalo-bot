@@ -130,7 +130,8 @@ type TutorCandidateDto = {
   trialLessonPrice?: number;
   averageRating: number;
   totalReviews: number;
-  completedHours: number;
+  totalCompletedLessons: number;
+  totalStudentsTaught: number;
   subscriptionType: 'standard' | 'pro' | 'premium';
   teachingMode: string;
   teachingAreaDistrict?: string;

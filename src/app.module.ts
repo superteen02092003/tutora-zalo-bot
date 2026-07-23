@@ -6,7 +6,6 @@ import { AppService } from './app.service';
 import { BeClientModule } from './be-client/be-client.module';
 import { ConversationStateModule } from './bot/state/conversation-state.module';
 import configuration from './common/config/configuration';
-import { LlmModule } from './llm/llm.module';
 import { WebhookModule } from './webhook/webhook.module';
 import { ZaloModule } from './zalo/zalo.module';
 
@@ -17,7 +16,6 @@ import { ZaloModule } from './zalo/zalo.module';
       load: [configuration],
       validationSchema: Joi.object({
         ZALO_OA_ACCESS_TOKEN: Joi.string().allow('').optional(),
-        ZALO_OA_REFRESH_TOKEN: Joi.string().allow('').optional(),
         ZALO_APP_ID: Joi.string().allow('').optional(),
         ZALO_APP_SECRET: Joi.string().allow('').optional(),
         ZALO_WEBHOOK_SECRET: Joi.string().allow('').optional(),
@@ -27,19 +25,13 @@ import { ZaloModule } from './zalo/zalo.module';
         BE_INTERNAL_API_KEY: Joi.string().allow('').optional(),
         BE_EVENT_SECRET: Joi.string().allow('').optional(),
         REDIS_URL: Joi.string().uri().default('redis://localhost:6379'),
-        DEEPSEEK_API_KEY: Joi.string().allow('').optional(),
-        DEEPSEEK_BASE_URL: Joi.string()
-          .uri()
-          .default('https://api.deepseek.com'),
-        DEEPSEEK_MODEL: Joi.string().default('deepseek-v4-flash'),
         ZBS_PAYMENT_TEMPLATE_ID: Joi.string().allow('').optional(),
         APP_PUBLIC_URL: Joi.string().uri().allow('').optional(),
         STUB_MODE: Joi.boolean().truthy('true').falsy('false').default(true),
         PORT: Joi.number().port().default(3000),
         AGENT_BASE_URL: Joi.string().uri().default('http://localhost:8000'),
         AGENT_API_KEY: Joi.string().allow('').optional(),
-        AGENT_USE_IAM_AUTH: Joi.boolean().truthy('true').falsy('false').default(false),
-        AI_MATCHING_ENABLED: Joi.boolean()
+        AGENT_USE_IAM_AUTH: Joi.boolean()
           .truthy('true')
           .falsy('false')
           .default(false),
@@ -50,7 +42,6 @@ import { ZaloModule } from './zalo/zalo.module';
     }),
     BeClientModule,
     ConversationStateModule,
-    LlmModule,
     WebhookModule,
     ZaloModule,
   ],

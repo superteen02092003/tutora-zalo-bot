@@ -16,7 +16,8 @@ export interface TutorCandidateDto {
   price_max?: number;
   averageRating: number;
   totalReviews: number;
-  completedHours: number;
+  totalCompletedLessons: number;
+  totalStudentsTaught: number;
   subscriptionType: TutorSubscriptionType;
   teachingMode: 'online' | 'offline' | 'both';
   teachingAreaCity?: string;

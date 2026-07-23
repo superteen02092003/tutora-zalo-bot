@@ -1,20 +1,23 @@
 import { AgentTutorItem } from './agent-client.types';
 import { TutorCandidateDto, TutorSubscriptionType } from '../be-client/dto';
 
-// Khớp _MAX_CARDS_SHOWN = 3 bên FastAPI agent (tutora-ai) — top 3 theo 3 tier.
-export const MAX_CARDS = 3;
-const TIER_BY_PRICE_RANK: TutorSubscriptionType[] = ['standard', 'pro', 'premium'];
+const TIER_BY_PRICE_RANK: TutorSubscriptionType[] = [
+  'standard',
+  'pro',
+  'premium',
+];
 
 /**
- * Map TutorRecommendItem (.NET, qua agent/search-direct) → TutorCandidateDto (card render).
- * Dùng chung cho cả AgentMatchingFlow (chat) và MiniAppSearchFlow (Mini App inline results)
- * — tách ra đây để 2 nơi không định nghĩa tier/mapping khác nhau, dễ lệch.
+ * Map TutorRecommendItem (.NET, qua agent/search-direct) → TutorCandidateDto (card render),
+ * dùng bởi MiniAppSearchFlow (Mini App inline results).
  *
  * TODO: thay bằng tier chính thức từ BE khi có (tutora-ai/agents/agentscenarios.md KB-A —
  * công thức tier phải deterministic ở BE/Ranking Core, đây chỉ là heuristic tạm cho demo:
  * xếp theo giá trong chính nhóm hiển thị).
  */
-export function mapAgentTutorsToCandidates(items: AgentTutorItem[]): TutorCandidateDto[] {
+export function mapAgentTutorsToCandidates(
+  items: AgentTutorItem[],
+): TutorCandidateDto[] {
   const priceRank = new Map<string, number>(
     [...items]
       .sort((a, b) => (a.pricePerHour ?? 0) - (b.pricePerHour ?? 0))
@@ -36,7 +39,8 @@ export function mapAgentTutorsToCandidates(items: AgentTutorItem[]): TutorCandid
       hourlyRate: item.pricePerHour ?? 0,
       averageRating: item.averageRating ?? 0,
       totalReviews: item.totalReviews ?? 0,
-      completedHours: item.completedHours ?? 0,
+      totalCompletedLessons: item.totalCompletedLessons ?? 0,
+      totalStudentsTaught: item.totalStudentsTaught ?? 0,
       subscriptionType: tier,
       teachingMode: mode === 'online' || mode === 'offline' ? mode : 'both',
       teachingAreaCity: item.teachingAreaCity ?? undefined,

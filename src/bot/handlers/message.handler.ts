@@ -1,63 +1,50 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { AgentClientService } from '../../agent/agent-client.service';
-import { TutorCandidateDto } from '../../be-client/dto';
-import { LlmRouterService } from '../../llm/llm-router.service';
-import { RouterDecision } from '../../llm/llm-router.types';
+import { MiniAppButtonService } from '../../mini-app/mini-app-button.service';
 import { ZaloWebhookEvent } from '../../webhook/zalo-event.dto';
 import { getMessageText, getZaloUserId } from '../../webhook/zalo-event.utils';
 import { ZaloService } from '../../zalo/zalo.service';
-import { AgentMatchingFlow } from '../flows/agent-matching.flow';
-import { MiniAppSearchFlow } from '../flows/mini-app-search.flow';
-import { OnboardingFlow } from '../flows/onboarding.flow';
-import { ChatMessage, ConversationContext } from '../state/conversation-context.interface';
-import { ConversationState } from '../state/conversation-state.enum';
 import { ConversationStateService } from '../state/conversation-state.service';
-
-// PH im lặng quá lâu rồi quay lại -> hỏi "tiếp tục tìm như cũ hay tìm mới" (welcome-back)
-// thay vì lẳng lặng tiếp tục hội thoại với ngữ cảnh cũ có thể đã lạc hậu.
-const SESSION_GAP_SECONDS = 3 * 60 * 60;
 
 /** null = tin nhắn không mang tín hiệu ngôn ngữ rõ ràng (giữ nguyên preferredLanguage cũ). */
 function detectLanguage(text: string): 'vi' | 'en' | null {
-  if (/[àáâãèéêìíòóôõùúăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ]/i.test(text)) {
+  if (
+    /[àáâãèéêìíòóôõùúăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ]/i.test(
+      text,
+    )
+  ) {
     return 'vi';
   }
-  // Không dấu tiếng Việt KHÔNG có nghĩa là tiếng Anh — bug thật 2026-07-13: PH trả lời "1"
-  // cho danh sách lựa chọn số (sendNumberedList, xem AgentMatchingFlow/zalo.service.ts) bị
-  // hiểu nhầm thành 'en' và LẬT VĨNH VIỄN preferredLanguage của cả hội thoại đang tiếng Việt.
-  // Chỉ coi là tín hiệu 'en' thật khi có ít nhất 2 chữ cái Latin liên tiếp (từ tiếng Anh thật
-  // sự, vd "ok"/"yes") — số/ký tự đơn lẻ không mang tín hiệu, trả null để bên gọi giữ nguyên.
   return /[a-z]{2,}/i.test(text) ? 'en' : null;
 }
 
-// Direct triggers — bypass LLM hoàn toàn.
-const FIND_TUTOR_TRIGGERS = ['#timgiasu', 'onboarding:start', 'tìm gia sư', 'tìm giasư'];
-
+/**
+ * Chatbot chỉ còn vai trò ĐIỀU HƯỚNG — mọi tin nhắn (trigger hay tự do) đều dẫn thẳng tới
+ * nút mở Mini App form filter, KHÔNG còn AI matching qua chat/LLM (AgentMatchingFlow +
+ * chatHistory/sessionMemory/welcome-back đã bỏ hẳn 2026-07-19 — nguồn gây "loạn dữ liệu
+ * cũ" mỗi khi PH muốn tìm gia sư khác, vì agent giữ ngữ cảnh hội thoại qua nhiều lượt).
+ * Tìm kiếm thật (có AI ranking) diễn ra hoàn toàn trong Mini App, xem MiniAppSearchFlow.
+ */
 @Injectable()
 export class MessageHandler {
   private readonly logger = new Logger(MessageHandler.name);
   private readonly adminUserIds: Set<string>;
-  private readonly aiMatchingEnabled: boolean;
 
   constructor(
     private readonly state: ConversationStateService,
     private readonly zalo: ZaloService,
-    private readonly llmRouter: LlmRouterService,
-    private readonly onboardingFlow: OnboardingFlow,
-    private readonly agentMatchingFlow: AgentMatchingFlow,
-    private readonly miniAppSearchFlow: MiniAppSearchFlow,
-    private readonly agentClient: AgentClientService,
+    private readonly miniAppButton: MiniAppButtonService,
     config: ConfigService,
   ) {
     this.adminUserIds = new Set(config.get<string[]>('adminZaloUserIds') ?? []);
-    this.aiMatchingEnabled = config.get<boolean>('aiMatching.enabled', false);
   }
 
   async handle(event: ZaloWebhookEvent): Promise<void> {
     const userId = getZaloUserId(event);
     if (!userId) {
-      this.logger.warn(`Message event missing sender id: ${JSON.stringify(event)}`);
+      this.logger.warn(
+        `Message event missing sender id: ${JSON.stringify(event)}`,
+      );
       return;
     }
 
@@ -72,341 +59,37 @@ export class MessageHandler {
       if (handled) return;
     }
 
-    // Auto-detect language from natural-language messages (skip commands/postbacks).
     let currentPreferredLanguage = context.preferredLanguage ?? 'vi';
-    if (text && !text.startsWith('#') && !text.startsWith('onboarding:') && !text.startsWith('select_tutor:')) {
+    if (text && !text.startsWith('#')) {
       const detectedLang = detectLanguage(text);
       if (detectedLang) {
         currentPreferredLanguage = detectedLang;
         if (detectedLang !== context.preferredLanguage) {
-          await this.state.updateContext(userId, { preferredLanguage: detectedLang });
+          await this.state.updateContext(userId, {
+            preferredLanguage: detectedLang,
+          });
         }
       }
     }
 
-    const candidates = await this.state.getMatchingCandidates<TutorCandidateDto>(userId);
-
-    // ── AI MATCHING (feature flag): hội thoại giai đoạn matching qua FastAPI agent ──
-    // Giữ nguyên đường cũ cho: postback onboarding:<slot> còn treo, nút select_tutor:
-    // (booking entry), và các sub-flow booking/sau-booking (agent Python không xử lý
-    // reschedule/cancel — xem tutora-ai/agents/agentscenarios.md mục 7).
-    //
-    // LUÔN đưa qua agent trước, KỂ CẢ khi chưa Matched — không tự chặn gửi nút Mini App
-    // ở tầng NestJS nữa (bug cũ: mọi tin nhắn trước khi Matched đều bị bắn thẳng nút "Điền
-    // thông tin tìm gia sư", kể cả câu hỏi Q&A chung chung không liên quan tìm kiếm — PH
-    // không chat tự do được). Agent (tutora-ai _handle_find_tutor) tự quyết: THIẾU môn/lớp
-    // (PH thật sự muốn tìm nhưng chưa đủ thông tin) → trả reopen_mini_app=true, NestJS mới
-    // gửi nút; còn FAQ/chitchat/hỏi kiến thức chung → agent trả lời thẳng qua chat.
-    const isFindTrigger = FIND_TUTOR_TRIGGERS.includes(text.toLowerCase().trim());
-    if (
-      this.aiMatchingEnabled &&
-      !text.startsWith('select_tutor:') &&
-      (!text.startsWith('onboarding:') || text === 'onboarding:start') &&
-      (isFindTrigger || !this.inBookingPhase(context))
-    ) {
-      const message = isFindTrigger ? 'tìm gia sư' : text;
-
-      // Welcome-back: PH quay lại sau gap dài (SESSION_GAP_SECONDS) — hỏi rõ "tiếp tục tìm
-      // như cũ hay tìm mới" trước khi vào agent, tránh agent âm thầm tiếp tục hội thoại với
-      // ngữ cảnh có thể đã lạc hậu (đổi ý, đổi bé...) mà PH không hay.
-      if (context.awaitingWelcomeBack) {
-        const handled = await this.handleWelcomeBackReply(userId, message, context);
-        if (handled) return;
-      } else if (await this.shouldWelcomeBack(userId, context)) {
-        await this.startWelcomeBack(userId, message, context);
-        return;
-      }
-
-      await this.agentMatchingFlow.handle(userId, message);
-      return;
-    }
-
-    if (isFindTrigger) {
-      await this.onboardingFlow.start(userId);
-      return;
-    }
-
-    // Structured payloads từ nút bấm (oa.query.hide) — route thẳng, không qua LLM.
-    if (text.startsWith('onboarding:')) {
-      await this.onboardingFlow.handlePostbackInput(userId, text);
-      return;
-    }
-    if (text.startsWith('select_tutor:')) {
-      const tutorId = text.slice('select_tutor:'.length);
-      const updatedCtx = await this.state.getContext(userId);
-      const tutor = candidates.find((c) => c.tutorId === tutorId);
-      if (tutor) {
-        await this.handleTutorSelected(userId, tutor, updatedCtx);
-      } else {
-        await this.zalo.sendText(
-          userId,
-          updatedCtx.preferredLanguage === 'en'
-            ? "Couldn't find that tutor. Please select again."
-            : 'Mình không tìm thấy gia sư này. Bạn thử chọn lại nhé?',
-        );
-      }
-      return;
-    }
-
-    const convState = await this.state.getState(userId);
-    const decision = await this.llmRouter.decide({ message: text, state: convState, context, candidates });
-    this.logger.debug(`LLM decision | user=${userId} | ${JSON.stringify(decision)}`);
-
-    const freshContext = await this.state.getContext(userId);
-    await this.executeDecision(userId, decision, freshContext, candidates);
-
-    if ('reply' in decision && decision.reply) {
-      await this.appendChatHistory(userId, text, decision.reply);
-    }
+    // Mọi tin nhắn (trigger hay tự do) đều mở nút Mini App form — chatbot không còn tự
+    // diễn giải nội dung tin nhắn để search hộ.
+    await this.miniAppButton.sendSearchButton(userId, currentPreferredLanguage);
   }
 
-  private async executeDecision(
-    userId: string,
-    decision: RouterDecision,
-    context: ConversationContext,
-    candidates: TutorCandidateDto[],
-  ): Promise<void> {
-    switch (decision.action) {
-      case 'start_onboarding':
-        await this.onboardingFlow.start(userId);
-        break;
-
-      case 'fill_slot':
-        await this.onboardingFlow.applySlot(userId, decision.slot, decision.value);
-        break;
-
-      case 'bulk_fill_slots':
-        await this.onboardingFlow.applyBulkSlots(userId, decision.slots);
-        break;
-
-      case 'select_tutor': {
-        const tutor = candidates.find((c) =>
-          c.fullName.toLowerCase().includes(decision.tutorName.toLowerCase()),
-        );
-        if (!tutor) {
-          await this.zalo.sendText(
-            userId,
-            context.preferredLanguage === 'en'
-              ? `Couldn't find tutor "${decision.tutorName}" in the list. Please select again.`
-              : `Mình không tìm thấy gia sư "${decision.tutorName}" trong danh sách. Bạn chọn lại nhé?`,
-          );
-          return;
-        }
-        await this.handleTutorSelected(userId, tutor, context);
-        break;
-      }
-
-      case 'select_package':
-        await this.state.updateContext(userId, { selectedPackageSessionCount: decision.sessionCount });
-        await this.zalo.sendNumberedList(
-          userId,
-          context.preferredLanguage === 'en'
-            ? `Selected ${decision.sessionCount} sessions! How many sessions per week?`
-            : `Đã chọn ${decision.sessionCount} buổi! Bạn muốn học mấy buổi mỗi tuần?`,
-          context.preferredLanguage === 'en'
-            ? [{ label: '2 sessions/week' }, { label: '3 sessions/week' }]
-            : [{ label: '2 buổi/tuần' }, { label: '3 buổi/tuần' }],
-        );
-        break;
-
-      case 'select_schedule': {
-        const freshCtx = await this.state.updateContext(userId, {
-          requiredSessionsPerWeek: decision.preset === 'twice_weekly' ? 2 : 3,
-        });
-        await this.zalo.sendText(
-          userId,
-          freshCtx.preferredLanguage === 'en'
-            ? "Got it! Tutora's team will reach out to confirm your schedule and send payment details."
-            : 'Tutora đã ghi nhận. Nhân viên Tutora sẽ liên hệ để xác nhận lịch và gửi thông tin thanh toán cho bạn sớm nhé!',
-        );
-        break;
-      }
-
-      case 'check_status':
-        await this.zalo.sendText(userId, this.buildStatusMessage(context));
-        break;
-
-      case 'answer_question':
-        await this.zalo.sendText(userId, decision.reply);
-        break;
-
-      case 'unknown':
-      default:
-        await this.zalo.sendText(
-          userId,
-          (decision as { reply?: string }).reply ??
-            (context.preferredLanguage === 'en'
-              ? "I didn't quite understand. Would you like to find a tutor or need other help?"
-              : 'Mình chưa hiểu ý bạn. Bạn muốn tìm gia sư hay cần hỗ trợ gì?'),
-        );
-        break;
-    }
-  }
-
-  private async handleTutorSelected(userId: string, tutor: TutorCandidateDto, context?: ConversationContext): Promise<void> {
-    await this.state.updateContext(userId, {
-      selectedTutorId: tutor.tutorId,
-      selectedTutorName: tutor.fullName,
-    });
-    const lang = context?.preferredLanguage ?? 'vi';
-    await this.zalo.sendNumberedList(
-      userId,
-      lang === 'en'
-        ? `You selected ${tutor.fullName}! How many sessions would you like?`
-        : `Bạn đã chọn ${tutor.fullName}! Bạn muốn học gói bao nhiêu buổi?`,
-      lang === 'en'
-        ? [
-            { label: '4 sessions', hint: 'trial' },
-            { label: '8 sessions', hint: 'popular' },
-            { label: '12 sessions', hint: 'best value' },
-          ]
-        : [
-            { label: '4 buổi', hint: 'thử nghiệm' },
-            { label: '8 buổi', hint: 'phổ biến' },
-            { label: '12 buổi', hint: 'tiết kiệm nhất' },
-          ],
-    );
-  }
-
-  private buildStatusMessage(context: ConversationContext): string {
-    const en = context.preferredLanguage === 'en';
-    if (context.activeBookingId) {
-      return en
-        ? `Your lesson schedule is active (booking #${context.activeBookingId}). How can I help?`
-        : `Lịch học của bạn đang hoạt động (booking #${context.activeBookingId}). Bạn cần hỗ trợ gì?`;
-    }
-    if (context.selectedTutorName) {
-      return en
-        ? `You're in the process of booking with ${context.selectedTutorName}. Would you like to continue?`
-        : `Bạn đang trong quá trình đặt lịch với ${context.selectedTutorName}. Bạn muốn tiếp tục không?`;
-    }
-    if (context.criteria?.subject) {
-      return en
-        ? `You're looking for a ${context.criteria.subject} tutor. Would you like to view the tutor list again?`
-        : `Bạn đang tìm gia sư môn ${context.criteria.subject}. Bạn muốn xem lại danh sách gia sư không?`;
-    }
-    return en
-      ? "You don't have any active lessons yet. Would you like to find a tutor?"
-      : 'Hiện bạn chưa có lịch học nào. Bạn muốn tìm gia sư không?';
-  }
-
-  private async appendChatHistory(userId: string, userText: string, botReply: string): Promise<void> {
-    const context = await this.state.getContext(userId);
-    const history: ChatMessage[] = context.chatHistory ?? [];
-    history.push({ role: 'user', content: userText });
-    history.push({ role: 'assistant', content: botReply });
-    await this.state.updateContext(userId, { chatHistory: history.slice(-20) });
-  }
-
-  // ── Welcome-back / session-memory ──────────────────────────────────────────
-  // PH quay lại sau gap dài (SESSION_GAP_SECONDS) giữa 2 lượt chat có nội dung thật (lịch
-  // sử >= 2 tin, không phải lần đầu) → hỏi rõ tiếp tục hay tìm mới thay vì âm thầm dùng lại
-  // ngữ cảnh cũ có thể đã lạc hậu.
-
-  private async shouldWelcomeBack(userId: string, context: ConversationContext): Promise<boolean> {
-    const history = context.chatHistory ?? [];
-    if (history.length < 2) return false; // chưa có phiên cũ đáng kể
-    const last = await this.state.getLastActivity(userId);
-    if (!last) return false;
-    const gapSeconds = (Date.now() - last.getTime()) / 1000;
-    return gapSeconds > SESSION_GAP_SECONDS;
-  }
-
-  private async startWelcomeBack(userId: string, text: string, context: ConversationContext): Promise<void> {
-    const lang = context.preferredLanguage ?? 'vi';
-    const summary = await this.agentClient.summarizeSession({
-      history: (context.chatHistory ?? []).map((m) => ({ role: m.role, content: m.content })),
-      shown_tutors: context.agentShownTutors ?? [],
-    });
-
-    if (!summary || !summary.has_pending_search || !summary.recap) {
-      // Không có việc dở / agent lỗi → coi như phiên mới, xử lý luôn tin nhắn hiện tại
-      // (không bắt PH gõ lại) — xoá lịch sử cũ để agent không lẫn ngữ cảnh lạc hậu.
-      await this.state.updateContext(userId, { chatHistory: [], agentShownTutors: [] });
-      await this.agentMatchingFlow.handle(userId, text);
-      return;
-    }
-
-    // Có việc dở -> lưu facts, hỏi tiếp tục/tìm mới bằng 2 nút, CHỜ PH chọn (không xử lý
-    // tin nhắn hiện tại ngay — có thể PH chỉ đang chào hỏi, chưa chắc muốn tiếp tục).
-    const m = summary.memory;
-    await this.state.updateContext(userId, {
-      awaitingWelcomeBack: true,
-      chatHistory: [],
-      sessionMemory: {
-        subject: m.subject,
-        grade: m.grade,
-        goal: m.goal,
-        budgetMax: m.budget_max,
-        preferences: m.preferences,
-        tutorsShown: m.tutors_shown,
-      },
-    });
-
-    await this.zalo.sendText(
-      userId,
-      lang === 'en' ? `Welcome back! ${summary.recap}` : `Dạ chào anh/chị quay lại ạ! ${summary.recap}`,
-    );
-    await this.zalo.sendNumberedList(
-      userId,
-      lang === 'en' ? 'Would you like to:' : 'Anh/chị muốn:',
-      lang === 'en'
-        ? [{ label: 'Continue' }, { label: 'Start over' }]
-        : [{ label: 'Tiếp tục tìm như cũ' }, { label: 'Tìm mới' }],
-    );
-  }
-
-  private async handleWelcomeBackReply(userId: string, text: string, context: ConversationContext): Promise<boolean> {
-    const t = text.toLowerCase().trim();
-    const wantsContinue =
-      /ti[eế]p t[uụ]c|như c[uũ]|continue|^1$|^1\.|đúng|ok|có/i.test(t) &&
-      !/t[iì]m m[oớ]i|mới|start over|^2$/i.test(t);
-
-    const mem = context.sessionMemory;
-    await this.state.updateContext(userId, { awaitingWelcomeBack: false });
-
-    if (wantsContinue && mem) {
-      // Pre-fill nhu cầu cũ thành 1 message tổng hợp -> agent hiểu ngữ cảnh, tìm luôn.
-      const parts: string[] = [];
-      if (mem.subject) parts.push(`môn ${mem.subject}`);
-      if (mem.grade) parts.push(`lớp ${mem.grade}`);
-      if (mem.goal) parts.push(mem.goal);
-      if (mem.preferences) parts.push(mem.preferences);
-      if (mem.budgetMax) parts.push(`giá dưới ${Math.round(mem.budgetMax / 1000)}k`);
-      const synthesized = `Tìm gia sư ${parts.join(', ')}`;
-      await this.agentMatchingFlow.handle(userId, synthesized);
-      return true;
-    }
-
-    // Tìm mới -> quên phiên cũ hẳn, xử lý tin nhắn hiện tại như phiên mới.
-    await this.state.updateContext(userId, {
-      sessionMemory: undefined,
-      chatHistory: [],
-      agentShownTutors: [],
-    });
-    await this.agentMatchingFlow.handle(userId, text);
-    return true;
-  }
-
-  // Đang trong phễu booking / sau-booking → giữ đường llm-router + flows cũ, KHÔNG đưa
-  // vào agent matching (agent chỉ phụ trách giai đoạn tìm gia sư). selectedTutorId tính
-  // là trong phễu (đang chọn gói/lịch qua free-text) — thoát bằng trigger "tìm gia sư".
-  private inBookingPhase(context: ConversationContext): boolean {
-    return Boolean(
-      context.bookingStep ||
-        context.activeFlow ||
-        context.activeBookingId ||
-        context.selectedTutorId,
-    );
-  }
-
-  private async handleAdminCommand(adminId: string, text: string): Promise<boolean> {
+  private async handleAdminCommand(
+    adminId: string,
+    text: string,
+  ): Promise<boolean> {
     const match = text.match(/^\/botchat\s+(on|off)\s+(\S+)$/i);
     if (!match) return false;
     const [, action, targetUserId] = match;
     const disabled = action.toLowerCase() === 'off';
     await this.state.updateContext(targetUserId, { botChatDisabled: disabled });
-    await this.zalo.sendText(adminId, `BotChat cho user ${targetUserId} đã được ${disabled ? 'TẮT' : 'BẬT'}.`);
+    await this.zalo.sendText(
+      adminId,
+      `BotChat cho user ${targetUserId} đã được ${disabled ? 'TẮT' : 'BẬT'}.`,
+    );
     return true;
   }
 }

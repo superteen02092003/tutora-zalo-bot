@@ -3,22 +3,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { lastValueFrom } from 'rxjs';
 import {
-  AgentRequestBody,
-  AgentResponseBody,
   DirectSearchRequestBody,
   DirectSearchResponseBody,
-  SummarizeSessionRequestBody,
-  SummarizeSessionResponseBody,
 } from './agent-client.types';
-
-interface AiRankResult {
-  tutor_id: string;
-}
-
-interface AiRecommendResponse {
-  results: AiRankResult[];
-  total: number;
-}
 
 const METADATA_IDENTITY_URL =
   'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity';
@@ -26,8 +13,10 @@ const METADATA_IDENTITY_URL =
 const ID_TOKEN_TTL_MS = 50 * 60 * 1000;
 
 /**
- * Client gọi FastAPI AI agent (tutora-ai) — bộ não hội thoại matching.
- * Agent stateless: bot giữ history + context (Redis), gửi kèm mỗi lượt.
+ * Client gọi FastAPI AI agent (tutora-ai) — chỉ còn search-direct (embedding + Bayesian
+ * rating, KHÔNG qua hội thoại/LLM). Đã bỏ chat()/summarizeSession()/rankCandidates()
+ * 2026-07-19 cùng AgentMatchingFlow — chatbot không còn matching qua chat nữa, xem
+ * MessageHandler + MiniAppSearchFlow.
  */
 @Injectable()
 export class AgentClientService {
@@ -49,88 +38,23 @@ export class AgentClientService {
     this.useIamAuth = config.get<boolean>('agent.useIamAuth', false);
   }
 
-  /** Lỗi/timeout → throw; caller quyết định câu xin lỗi gửi user. */
-  async chat(body: AgentRequestBody): Promise<AgentResponseBody> {
-    const url = `${this.baseUrl.replace(/\/$/, '')}/api/v1/agent`;
-    const headers: Record<string, string> = { 'X-API-Key': this.apiKey };
-    const idToken = await this.getIdToken();
-    if (idToken) headers.Authorization = `Bearer ${idToken}`;
-
-    const response = await lastValueFrom(
-      this.http.post<AgentResponseBody>(url, body, {
-        headers,
-        // Agent gọi Gemini (trích slot + diễn đạt) + .NET search — có thể mất vài giây.
-        timeout: 30_000,
-      }),
-    );
-    return response.data;
-  }
-
   /** Search THẲNG, KHÔNG qua hội thoại (xem DirectSearchRequestBody) — Mini App hiển thị
    * kết quả ngay trong form + nút "tìm gia sư khác" (exclude_tutor_ids). */
-  async searchDirect(body: DirectSearchRequestBody): Promise<DirectSearchResponseBody> {
+  async searchDirect(
+    body: DirectSearchRequestBody,
+  ): Promise<DirectSearchResponseBody> {
     const url = `${this.baseUrl.replace(/\/$/, '')}/api/v1/tutors/search-direct`;
     const headers: Record<string, string> = { 'X-API-Key': this.apiKey };
     const idToken = await this.getIdToken();
     if (idToken) headers.Authorization = `Bearer ${idToken}`;
 
     const response = await lastValueFrom(
-      this.http.post<DirectSearchResponseBody>(url, body, { headers, timeout: 20_000 }),
+      this.http.post<DirectSearchResponseBody>(url, body, {
+        headers,
+        timeout: 20_000,
+      }),
     );
     return response.data;
-  }
-
-  /**
-   * Rerank candidate gia sư theo mức liên quan ngữ nghĩa (embedding) với query tự do —
-   * dùng cho luồng onboarding CŨ (nút bấm, xem MatchingFlow.showMatches), KHÁC hẳn
-   * search-direct/chat (agent chính đã tự rank qua Ranking Core .NET rồi). Lỗi/chưa cấu
-   * hình → trả lại đúng candidateIds ban đầu (graceful degradation, không chặn hiển thị).
-   */
-  async rankCandidates(query: string, candidateIds: string[], topK = 10): Promise<string[]> {
-    if (candidateIds.length === 0) return candidateIds;
-    try {
-      const url = `${this.baseUrl.replace(/\/$/, '')}/api/v1/tutors/recommend`;
-      const headers: Record<string, string> = { 'X-API-Key': this.apiKey };
-      const idToken = await this.getIdToken();
-      if (idToken) headers.Authorization = `Bearer ${idToken}`;
-
-      const response = await lastValueFrom(
-        this.http.post<AiRecommendResponse>(
-          url,
-          { query, candidate_ids: candidateIds, top_k: topK },
-          { headers, timeout: 8_000 },
-        ),
-      );
-      const ranked = response.data?.results ?? [];
-      if (ranked.length === 0) return candidateIds;
-
-      const rankedIds = ranked.map((r) => r.tutor_id);
-      const rankedSet = new Set(rankedIds);
-      const remainder = candidateIds.filter((id) => !rankedSet.has(id));
-      return [...rankedIds, ...remainder];
-    } catch (error) {
-      this.logger.warn(`rankCandidates lỗi, giữ nguyên thứ tự gốc: ${String(error)}`);
-      return candidateIds;
-    }
-  }
-
-  /** Tóm tắt phiên chat CŨ khi PH quay lại sau gap dài (welcome-back) -> structured facts
-   * + recap 1 câu. null nếu lỗi (caller fallback chào mới, không chặn hội thoại). */
-  async summarizeSession(body: SummarizeSessionRequestBody): Promise<SummarizeSessionResponseBody | null> {
-    try {
-      const url = `${this.baseUrl.replace(/\/$/, '')}/api/v1/summarize-session`;
-      const headers: Record<string, string> = { 'X-API-Key': this.apiKey };
-      const idToken = await this.getIdToken();
-      if (idToken) headers.Authorization = `Bearer ${idToken}`;
-
-      const response = await lastValueFrom(
-        this.http.post<SummarizeSessionResponseBody>(url, body, { headers, timeout: 15_000 }),
-      );
-      return response.data;
-    } catch (error) {
-      this.logger.warn(`summarizeSession lỗi: ${String(error)}`);
-      return null;
-    }
   }
 
   /** Google identity token cho audience = chính agent's URL. Cache tới gần hết hạn. */
@@ -155,7 +79,7 @@ export class AgentClientService {
       // sau đó sẽ bị 403. Log rõ để dễ debug (thường do KHÔNG chạy trên GCP/thiếu quyền).
       this.logger.error(
         `Không lấy được Google identity token (metadata server) — chỉ hoạt động khi ` +
-        `chạy trên GCP với service account đủ quyền: ${String(error)}`,
+          `chạy trên GCP với service account đủ quyền: ${String(error)}`,
       );
       return undefined;
     }

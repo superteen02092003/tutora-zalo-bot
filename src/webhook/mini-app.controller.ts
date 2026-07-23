@@ -1,7 +1,6 @@
-import { Body, Controller, Logger, Post, Get, Query } from '@nestjs/common';
+import { Controller, Logger, Post, Get, Query, Body } from '@nestjs/common';
 import { MiniAppSearchFlow } from '../bot/flows/mini-app-search.flow';
 import type {
-  MiniAppSearchSubmission,
   MiniAppSearchResultsRequest,
   MiniAppSearchResultsResponse,
 } from '../bot/flows/mini-app-search.flow';
@@ -46,7 +45,9 @@ export class MiniAppController {
    * agentCtx hiện có để wizard điền sẵn thay vì bắt điền lại từ đầu. Không có gì để điền
    * sẵn (lần đầu tìm) → trả {ok:true} không kèm field nào, wizard hiện form trống bình thường. */
   @Get('miniapp-search/prefill')
-  async getPrefill(@Query('token') token: string): Promise<MiniAppPrefillResponse> {
+  async getPrefill(
+    @Query('token') token: string,
+  ): Promise<MiniAppPrefillResponse> {
     const verified = this.tokenService.verify(token);
     if (!verified) {
       return { ok: false };
@@ -55,43 +56,31 @@ export class MiniAppController {
     const ctx = context.agentCtx ?? {};
     return {
       ok: true,
-      subjectId: typeof ctx.subject_id === 'number' ? ctx.subject_id : undefined,
-      gradeLevelId: typeof ctx.grade_level_id === 'number' ? ctx.grade_level_id : undefined,
+      subjectId:
+        typeof ctx.subject_id === 'number' ? ctx.subject_id : undefined,
+      gradeLevelId:
+        typeof ctx.grade_level_id === 'number' ? ctx.grade_level_id : undefined,
       goal: typeof ctx.goal === 'string' ? ctx.goal : undefined,
       minRate: typeof ctx.min_rate === 'number' ? ctx.min_rate : undefined,
       maxRate: typeof ctx.max_rate === 'number' ? ctx.max_rate : undefined,
       teachingMode:
-        ctx.teaching_mode === 'online' || ctx.teaching_mode === 'offline' || ctx.teaching_mode === 'both'
+        ctx.teaching_mode === 'online' ||
+        ctx.teaching_mode === 'offline' ||
+        ctx.teaching_mode === 'both'
           ? ctx.teaching_mode
           : undefined,
       city: typeof ctx.city === 'string' ? ctx.city : undefined,
-      tutorGender: ctx.tutor_gender === 'male' || ctx.tutor_gender === 'female' ? ctx.tutor_gender : undefined,
+      tutorGender:
+        ctx.tutor_gender === 'male' || ctx.tutor_gender === 'female'
+          ? ctx.tutor_gender
+          : undefined,
     };
   }
 
-  @Post('miniapp-search')
-  async handleSubmit(
-    @Body() body: MiniAppSearchSubmission,
-  ): Promise<{ ok: boolean; error?: string }> {
-    // Giải mã token TRƯỚC để lấy zaloUserId làm key hàng đợi (tránh race với tin nhắn
-    // chat cùng lúc của cùng user — dùng chung UserSerialQueue với webhook Zalo).
-    const verified = this.tokenService.verify(body.token);
-    if (!verified) {
-      this.logger.warn('Mini App submit với token không hợp lệ/hết hạn.');
-      return { ok: false, error: 'invalid_or_expired_token' };
-    }
-    const { userId } = verified;
-    try {
-      return await this.queue.run(userId, () => this.miniAppSearchFlow.handleFormSubmit(body));
-    } catch (error) {
-      this.logger.error(`Xử lý Mini App submit lỗi cho user=${userId}: ${String(error)}`);
-      return { ok: false, error: 'internal_error' };
-    }
-  }
-
-  /** Search THẲNG + trả kết quả NGAY cho Mini App render inline (list gọn kiểu Preply) —
-   * khác /miniapp-search: KHÔNG chờ user quay lại Zalo chat mới thấy gia sư. Cùng dùng cho
-   * lượt tìm đầu VÀ nút "Tìm gia sư khác" (excludeTutorIds). */
+  /** Search THẲNG + trả kết quả NGAY cho Mini App render inline (list gọn kiểu Preply).
+   * Cùng dùng cho lượt tìm đầu VÀ nút "Tìm gia sư khác" (excludeTutorIds). Đã bỏ endpoint
+   * /miniapp-search (handoff về chat qua AgentMatchingFlow) 2026-07-19 — dead code, FE
+   * không còn nơi nào gọi tới (chỉ dùng /miniapp-search/results). */
   @Post('miniapp-search/results')
   async getResults(
     @Body() body: MiniAppSearchResultsRequest,
@@ -103,9 +92,13 @@ export class MiniAppController {
     }
     const { userId } = verified;
     try {
-      return await this.queue.run(userId, () => this.miniAppSearchFlow.getResults(body));
+      return await this.queue.run(userId, () =>
+        this.miniAppSearchFlow.getResults(body),
+      );
     } catch (error) {
-      this.logger.error(`Xử lý Mini App getResults lỗi cho user=${userId}: ${String(error)}`);
+      this.logger.error(
+        `Xử lý Mini App getResults lỗi cho user=${userId}: ${String(error)}`,
+      );
       return { ok: false, error: 'internal_error' };
     }
   }
