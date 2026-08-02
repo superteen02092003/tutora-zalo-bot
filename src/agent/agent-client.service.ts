@@ -3,6 +3,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { lastValueFrom } from 'rxjs';
 import {
+  AgentChatRequestBody,
+  AgentChatResponseBody,
   DirectSearchRequestBody,
   DirectSearchResponseBody,
 } from './agent-client.types';
@@ -13,10 +15,12 @@ const METADATA_IDENTITY_URL =
 const ID_TOKEN_TTL_MS = 50 * 60 * 1000;
 
 /**
- * Client gọi FastAPI AI agent (tutora-ai) — chỉ còn search-direct (embedding + Bayesian
- * rating, KHÔNG qua hội thoại/LLM). Đã bỏ chat()/summarizeSession()/rankCandidates()
- * 2026-07-19 cùng AgentMatchingFlow — chatbot không còn matching qua chat nữa, xem
- * MessageHandler + MiniAppSearchFlow.
+ * Client gọi FastAPI AI agent (tutora-ai). 2 nhóm method:
+ * - searchDirect: KHÔNG qua LLM — Mini App form gửi tiêu chí đã rõ (id thật).
+ * - chat: CÓ LLM (POST /api/v1/agent, channel="zalo") — tin nhắn tự do trong ZaloOA. Hồi
+ *   sinh lại 2026-08-02 sau khi bị bỏ 2026-07-19 cùng AgentMatchingFlow: matching THẬT vẫn
+ *   chỉ qua Mini App (xem MiniAppSearchFlow), nhưng chat tự do cần LLM trả lời tự nhiên thay
+ *   vì luôn chỉ bắn nút — xem MessageHandler.
  */
 @Injectable()
 export class AgentClientService {
@@ -44,17 +48,34 @@ export class AgentClientService {
     body: DirectSearchRequestBody,
   ): Promise<DirectSearchResponseBody> {
     const url = `${this.baseUrl.replace(/\/$/, '')}/api/v1/tutors/search-direct`;
-    const headers: Record<string, string> = { 'X-API-Key': this.apiKey };
-    const idToken = await this.getIdToken();
-    if (idToken) headers.Authorization = `Bearer ${idToken}`;
-
     const response = await lastValueFrom(
       this.http.post<DirectSearchResponseBody>(url, body, {
-        headers,
+        headers: await this.authHeaders(),
         timeout: 20_000,
       }),
     );
     return response.data;
+  }
+
+  /** Hội thoại CÓ LLM — stateless phía tutora-ai, bot PHẢI tự giữ và gửi lại history/
+   * context/shown_tutors mỗi lượt (xem ConversationContext.chatHistory/agentCtx/shownTutors).
+   * Timeout dài hơn searchDirect vì gọi Gemini (trích slot + diễn đạt câu trả lời). */
+  async chat(body: AgentChatRequestBody): Promise<AgentChatResponseBody> {
+    const url = `${this.baseUrl.replace(/\/$/, '')}/api/v1/agent`;
+    const response = await lastValueFrom(
+      this.http.post<AgentChatResponseBody>(url, body, {
+        headers: await this.authHeaders(),
+        timeout: 30_000,
+      }),
+    );
+    return response.data;
+  }
+
+  private async authHeaders(): Promise<Record<string, string>> {
+    const headers: Record<string, string> = { 'X-API-Key': this.apiKey };
+    const idToken = await this.getIdToken();
+    if (idToken) headers.Authorization = `Bearer ${idToken}`;
+    return headers;
   }
 
   /** Google identity token cho audience = chính agent's URL. Cache tới gần hết hạn. */
