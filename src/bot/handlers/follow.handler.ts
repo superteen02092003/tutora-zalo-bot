@@ -14,11 +14,12 @@ export class FollowHandler {
     this.logger.log(`Follow event received, zaloUserId=${zaloUserId}`);
 
     if (!zaloUserId) {
-      this.logger.warn(`Follow event missing sender id: ${JSON.stringify(event)}`);
+      this.logger.warn(
+        `Follow event missing sender id: ${JSON.stringify(event)}`,
+      );
       return;
     }
 
-    // TODO: implement welcome message / flow trigger here
     await this.zalo.sendText(zaloUserId, 'Chào mừng bạn đến với Tutora!');
   }
 }
