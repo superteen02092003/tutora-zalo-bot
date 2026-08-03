@@ -62,40 +62,25 @@ describe('ConversationStateService', () => {
   });
 
   it('updates context while preserving zaloUserId', async () => {
-    await service.updateContext('zalo-1', { parentId: 'parent-1' });
+    await service.updateContext('zalo-1', { preferredLanguage: 'en' });
 
     await expect(service.getContext('zalo-1')).resolves.toMatchObject({
       zaloUserId: 'zalo-1',
-      parentId: 'parent-1',
+      preferredLanguage: 'en',
     });
   });
 
   it('returns full conversation records', async () => {
-    await service.setState('zalo-1', ConversationState.Onboarding);
-    await service.updateContext('zalo-1', { parentId: 'parent-1' });
+    await service.setState('zalo-1', ConversationState.Matched);
+    await service.updateContext('zalo-1', { preferredLanguage: 'en' });
 
     await expect(service.getConversation('zalo-1')).resolves.toMatchObject({
-      state: ConversationState.Onboarding,
+      state: ConversationState.Matched,
       context: {
         zaloUserId: 'zalo-1',
-        parentId: 'parent-1',
+        preferredLanguage: 'en',
       },
     });
-  });
-
-  it('allows valid transitions', async () => {
-    await service.transitionState('zalo-1', ConversationState.Onboarding);
-    await service.transitionState('zalo-1', ConversationState.Matched);
-
-    await expect(service.getState('zalo-1')).resolves.toBe(
-      ConversationState.Matched,
-    );
-  });
-
-  it('rejects invalid transitions', async () => {
-    await expect(
-      service.transitionState('zalo-1', ConversationState.Active),
-    ).rejects.toThrow('Invalid conversation transition');
   });
 
   it('increments and resets message count', async () => {

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { RedisService } from '../../common/redis/redis.service';
 import { ConversationContext } from './conversation-context.interface';
 import { ConversationState } from './conversation-state.enum';
@@ -12,31 +12,6 @@ export interface ConversationRecord {
 export const CONVERSATION_TTL_SECONDS = 7 * 24 * 60 * 60;
 export const MATCHING_TTL_SECONDS = 60 * 60;
 export const BE_EVENT_TTL_SECONDS = 3 * 24 * 60 * 60;
-
-const ALLOWED_TRANSITIONS: Record<ConversationState, ConversationState[]> = {
-  [ConversationState.New]: [ConversationState.Onboarding],
-  [ConversationState.Onboarding]: [
-    ConversationState.Matched,
-    ConversationState.New,
-  ],
-  [ConversationState.Matched]: [
-    ConversationState.BookingConfirm,
-    ConversationState.Onboarding,
-  ],
-  [ConversationState.BookingConfirm]: [
-    ConversationState.Booked,
-    ConversationState.Matched,
-    ConversationState.New,
-  ],
-  [ConversationState.Booked]: [
-    ConversationState.Active,
-    ConversationState.Onboarding,
-  ],
-  [ConversationState.Active]: [
-    ConversationState.Onboarding,
-    ConversationState.Matched,
-  ],
-};
 
 @Injectable()
 export class ConversationStateService {
@@ -65,25 +40,6 @@ export class ConversationStateService {
       context: record?.context ?? { zaloUserId },
       updatedAt: new Date().toISOString(),
     });
-  }
-
-  async transitionState(
-    zaloUserId: string,
-    nextState: ConversationState,
-  ): Promise<void> {
-    const currentState = await this.getState(zaloUserId);
-
-    if (currentState === nextState) {
-      return;
-    }
-
-    if (!ALLOWED_TRANSITIONS[currentState].includes(nextState)) {
-      throw new BadRequestException(
-        `Invalid conversation transition: ${currentState} -> ${nextState}`,
-      );
-    }
-
-    await this.setState(zaloUserId, nextState);
   }
 
   async getContext<T extends ConversationContext = ConversationContext>(
