@@ -13,7 +13,18 @@ import { ZaloService } from '../../zalo/zalo.service';
 import { ConversationContext } from '../state/conversation-context.interface';
 import { ConversationStateService } from '../state/conversation-state.service';
 
-/** null = tin nhắn không mang tín hiệu ngôn ngữ rõ ràng (giữ nguyên preferredLanguage cũ). */
+// Từ tiếng Anh phổ biến trong tin nhắn phụ huynh nhắn cho trợ lý tìm gia sư — dùng để nhận
+// diện tiếng Anh một cách CHẮC CHẮN, thay vì suy đoán từ "có chữ cái Latin" (xem bug bên
+// dưới). \b để chỉ khớp từ trọn vẹn, tránh khớp nhầm vào giữa 1 từ khác.
+const EN_HINT_WORDS =
+  /\b(hello|hi|hey|thanks|thank you|please|yes|no|tutor|child|kid|grade|subject|need|want|help|find|looking|budget|online|offline|schedule|available|today|tomorrow)\b/i;
+
+/** null = tin nhắn không mang tín hiệu ngôn ngữ rõ ràng (giữ nguyên preferredLanguage cũ).
+ * Mặc định NGHIÊNG VỀ TIẾNG VIỆT (thị trường chính) — bug thật: bản cũ coi bất kỳ chữ nào
+ * có ≥2 ký tự Latin liên tiếp là tiếng Anh, nên tiếng Việt KHÔNG DẤU (rất phổ biến khi gõ
+ * nhanh, vd "toi can tim gia su cho con") bị nhận NHẦM thành tiếng Anh — phản hồi khách hàng
+ * thật (Lien, 2026-08) xác nhận đúng lỗi này. Giờ chỉ coi là tiếng Anh khi có từ tiếng Anh
+ * phổ biến THẬT SỰ xuất hiện, không chỉ dựa vào bảng chữ cái. */
 function detectLanguage(text: string): 'vi' | 'en' | null {
   if (
     /[àáâãèéêìíòóôõùúăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ]/i.test(
@@ -22,7 +33,8 @@ function detectLanguage(text: string): 'vi' | 'en' | null {
   ) {
     return 'vi';
   }
-  return /[a-z]{2,}/i.test(text) ? 'en' : null;
+  if (EN_HINT_WORDS.test(text)) return 'en';
+  return null;
 }
 
 // Giữ 10 lượt gần nhất (20 message) gửi cho /api/v1/agent mỗi lần — agent stateless, KHÔNG
