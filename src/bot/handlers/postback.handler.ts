@@ -2,10 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ZaloWebhookEvent } from '../../webhook/zalo-event.dto';
 import { getEventPayload, getZaloUserId } from '../../webhook/zalo-event.utils';
 
-// Không còn payload nào để route thẳng — "onboarding:"/"select_tutor:" (luồng nút bấm cũ)
-// đã bỏ 2026-07-18: OnboardingFlow xoá hẳn, "Đặt lịch" trên tutor card giờ mở thẳng URL
-// Mini App (oa.open.url) thay vì postback (oa.query.hide), xem
-// MiniAppButtonService.buildTutorDetailLink + ZaloService.sendTutorCard. Giữ handler này
+// Không còn payload nào để route thẳng — luồng nút bấm cũ (onboarding, tutor card, Mini App
+// tìm gia sư) đã bỏ hết. Giữ handler này
 // (đăng ký ở WebhookModule, WebhookService.dispatchZaloEvent case 'postback') chỉ để log
 // nếu Zalo gửi 1 postback nào đó ta chưa biết tới, tránh vỡ dispatch nếu type event vẫn
 // còn phát sinh từ phía Zalo (template button mặc định...).

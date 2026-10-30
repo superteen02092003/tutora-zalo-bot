@@ -9,9 +9,9 @@ import { createHash, timingSafeEqual } from 'crypto';
 import { BeEventDto } from '../be-client/dto';
 import { BeEventHandler } from '../bot/handlers/be-event.handler';
 import { FollowHandler } from '../bot/handlers/follow.handler';
-import { MessageHandler } from '../bot/handlers/message.handler';
 import { PostbackHandler } from '../bot/handlers/postback.handler';
 import { ConversationStateService } from '../bot/state/conversation-state.service';
+import { ChatLogService, getChatDirection } from '../chat-log/chat-log.service';
 import { ZaloWebhookEvent } from './zalo-event.dto';
 
 @Injectable()
@@ -24,10 +24,10 @@ export class WebhookService {
   constructor(
     config: ConfigService,
     private readonly followHandler: FollowHandler,
-    private readonly messageHandler: MessageHandler,
     private readonly postbackHandler: PostbackHandler,
     private readonly beEventHandler: BeEventHandler,
     private readonly conversationState: ConversationStateService,
+    private readonly chatLog: ChatLogService,
   ) {
     this.zaloWebhookSecret = config.get<string>('zalo.webhookSecret');
     this.beEventSecret = config.get<string>('backend.eventSecret');
@@ -82,29 +82,30 @@ export class WebhookService {
           : ''),
     );
 
+    // Tin nhắn 2 chiều chỉ được lưu lại, bot KHÔNG tự trả lời — nhân viên trả lời tay trên
+    // trang quản lý OA (đã bỏ AI agent/LLM và Mini App tìm gia sư, 2026-10-30).
+    if (getChatDirection(eventType ?? '')) {
+      await this.chatLog.record(event);
+      return;
+    }
+
     switch (eventType) {
       case 'follow':
         await this.followHandler.handle(event);
-        break;
-      case 'user_send_text':
-      case 'user_send_image':
-      case 'user_send_sticker':
-        await this.messageHandler.handle(event);
         break;
       case 'postback':
         await this.postbackHandler.handle(event);
         break;
       case 'unfollow':
-        // PH huỷ quan tâm OA -> xoá sạch context hội thoại. Nếu không, follow lại vẫn
-        // "nhớ" agentCtx cũ (Zalo phía họ đã xoá lịch sử chat rồi, nhưng bot vẫn giữ
-        // state riêng trong Redis) -> Mini App prefill lại tiêu chí cũ không còn hợp lý.
+        // PH huỷ quan tâm OA -> xoá context hội thoại trong Redis (lịch sử chat trong
+        // Postgres vẫn giữ nguyên để phân tích).
         if (userId !== 'unknown') {
           await this.conversationState.resetConversation(userId);
           this.logger.log(`Unfollow: đã xoá context cho user=${userId}`);
         }
         break;
-      case 'oa_send_text':
-        this.logger.debug(`Ignoring Zalo event type: ${eventType}`);
+      case 'user_received_message':
+      case 'user_seen_message':
         break;
       default:
         this.logger.warn(

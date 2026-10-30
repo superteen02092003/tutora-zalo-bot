@@ -15,10 +15,10 @@ describe('WebhookService', () => {
   };
 
   const followHandler = { handle: jest.fn() };
-  const messageHandler = { handle: jest.fn() };
   const postbackHandler = { handle: jest.fn() };
   const beEventHandler = { handle: jest.fn() };
   const conversationState = { tryClaimBeEvent: jest.fn() };
+  const chatLog = { record: jest.fn() };
 
   let service: WebhookService;
 
@@ -27,18 +27,24 @@ describe('WebhookService', () => {
     service = new WebhookService(
       config as never,
       followHandler as never,
-      messageHandler as never,
       postbackHandler as never,
       beEventHandler as never,
       conversationState as never,
+      chatLog as never,
     );
   });
 
   it('verifies valid Zalo signatures', () => {
     const rawBody = Buffer.from('{"event_name":"follow"}');
-    const body = { event_name: 'follow', app_id: 'app-1', timestamp: '1700000000' };
+    const body = {
+      event_name: 'follow',
+      app_id: 'app-1',
+      timestamp: '1700000000',
+    };
     const mac = createHash('sha256')
-      .update(body.app_id + rawBody.toString('utf8') + body.timestamp + 'zalo-secret')
+      .update(
+        body.app_id + rawBody.toString('utf8') + body.timestamp + 'zalo-secret',
+      )
       .digest('hex');
 
     expect(() =>
@@ -48,19 +54,35 @@ describe('WebhookService', () => {
 
   it('rejects invalid Zalo signatures', () => {
     const rawBody = Buffer.from('{"event_name":"follow"}');
-    const body = { event_name: 'follow', app_id: 'app-1', timestamp: '1700000000' };
+    const body = {
+      event_name: 'follow',
+      app_id: 'app-1',
+      timestamp: '1700000000',
+    };
 
     expect(() =>
       service.verifyZaloSignature('mac=bad-signature', rawBody, body),
     ).toThrow(UnauthorizedException);
   });
 
-  it('dispatches Zalo message events', async () => {
-    await service.dispatchZaloEvent({ event_name: 'user_send_text' });
+  it.each([
+    'user_send_text',
+    'user_send_image',
+    'oa_send_text',
+    'oa_send_list',
+  ])('records %s to chat log without replying', async (eventName) => {
+    const event = { event_name: eventName };
+    await service.dispatchZaloEvent(event);
 
-    expect(messageHandler.handle).toHaveBeenCalledWith({
-      event_name: 'user_send_text',
-    });
+    expect(chatLog.record).toHaveBeenCalledWith(event);
+    expect(followHandler.handle).not.toHaveBeenCalled();
+    expect(postbackHandler.handle).not.toHaveBeenCalled();
+  });
+
+  it('does not record seen/received status events', async () => {
+    await service.dispatchZaloEvent({ event_name: 'user_seen_message' });
+
+    expect(chatLog.record).not.toHaveBeenCalled();
   });
 
   it('deduplicates BE events before handling', async () => {
